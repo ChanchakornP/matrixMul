@@ -348,7 +348,7 @@ void printMatrix(Matrix A, int row, int col)
             printf("\n");
         }
     }
-    printf("\n\n");
+    printf("\n");
 
     return;
 }
@@ -457,9 +457,13 @@ int main(int argc, char *argv[])
     initializeMatrix(&MatD, m, n); // Init with all zeros
 
     // Display first 4x4 Matrix
+    printf("Printing Matrix A\n");
     printMatrix(MatA, 4, 4);
+    printf("Printing Matrix B\n");
     printMatrix(MatB, 4, 4);
+    printf("Printing Matrix C\n");
     printMatrix(MatC, 4, 4);
+    printf("Printing Matrix D\n");
     printMatrix(MatD, 4, 4);
 
     matrixMulSequencial(MatA, MatB, MatC, MatD);
