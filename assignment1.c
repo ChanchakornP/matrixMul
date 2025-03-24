@@ -178,101 +178,389 @@ void matrixMulUnrolled(Matrix A, Matrix B, Matrix Buffer)
     if (IS_DOUBLE)
     {
         gettimeofday(&start_time, 0);
-        double a00, a01, a02, a03, a10, a11, a12, a13, a20, a21, a22, a23, a30, a31, a32, a33;
-        double b00, b01, b02, b03, b10, b11, b12, b13, b20, b21, b22, b23, b30, b31, b32, b33;
+        double ai00, ai01, ai02, ai03, ai10, ai11, ai12, ai13, ai20, ai21, ai22, ai23, ai30, ai31, ai32, ai33;
+        double bj00, bj01, bj02, bj03, bj10, bj11, bj12, bj13, bj20, bj21, bj22, bj23, bj30, bj31, bj32, bj33;
 
         double **buffer_data = ((double **)Buffer.data);
         double **A_data = (double **)A.data;
         double **B_data = (double **)B.data;
 
-        for (int i = 0; i < A.rows; i += 4)
+        int i, j, k;
+        int NRA0 = A.rows / 4 * 4;
+        int NCA0 = A.columns / 4 * 4;
+        int NCB0 = B.columns / 4 * 4;
+
+        for (i = 0; i < NRA0; i += 4)
         {
-            for (int k = 0; k < A.columns; k += 4)
+            for (k = 0; k < NCA0; k += 4)
             {
-                a00 = A_data[i][k], a01 = A_data[i][k + 1], a02 = A_data[i][k + 2], a03 = A_data[i][k + 3];
-                a10 = A_data[i + 1][k], a11 = A_data[i + 1][k + 1], a12 = A_data[i + 1][k + 2], a13 = A_data[i + 1][k + 3];
-                a20 = A_data[i + 2][k], a21 = A_data[i + 2][k + 1], a22 = A_data[i + 2][k + 2], a23 = A_data[i + 2][k + 3];
-                a30 = A_data[i + 3][k], a31 = A_data[i + 3][k + 1], a32 = A_data[i + 3][k + 2], a33 = A_data[i + 3][k + 3];
-                for (int j = 0; j < B.columns; j += 4)
+                ai00 = A_data[i][k];
+                ai01 = A_data[i][k + 1];
+                ai02 = A_data[i][k + 2];
+                ai03 = A_data[i][k + 3];
+                ai10 = A_data[i + 1][k];
+                ai11 = A_data[i + 1][k + 1];
+                ai12 = A_data[i + 1][k + 2];
+                ai13 = A_data[i + 1][k + 3];
+                ai20 = A_data[i + 2][k];
+                ai21 = A_data[i + 2][k + 1];
+                ai22 = A_data[i + 2][k + 2];
+                ai23 = A_data[i + 2][k + 3];
+                ai30 = A_data[i + 3][k];
+                ai31 = A_data[i + 3][k + 1];
+                ai32 = A_data[i + 3][k + 2];
+                ai33 = A_data[i + 3][k + 3];
+
+                for (j = 0; j < NCB0; j += 4)
                 {
-                    b00 = B_data[k][j], b01 = B_data[k][j + 1], b02 = B_data[k][j + 2], b03 = B_data[k][j + 3];
-                    b10 = B_data[k + 1][j], b11 = B_data[k + 1][j + 1], b12 = B_data[k + 1][j + 2], b13 = B_data[k + 1][j + 3];
-                    b20 = B_data[k + 2][j], b21 = B_data[k + 2][j + 1], b22 = B_data[k + 2][j + 2], b23 = B_data[k + 2][j + 3];
-                    b30 = B_data[k + 3][j], b31 = B_data[k + 3][j + 1], b32 = B_data[k + 3][j + 2], b33 = B_data[k + 3][j + 3];
+                    bj00 = B_data[k][j];
+                    bj01 = B_data[k][j + 1];
+                    bj02 = B_data[k][j + 2];
+                    bj03 = B_data[k][j + 3];
+                    bj10 = B_data[k + 1][j];
+                    bj11 = B_data[k + 1][j + 1];
+                    bj12 = B_data[k + 1][j + 2];
+                    bj13 = B_data[k + 1][j + 3];
+                    bj20 = B_data[k + 2][j];
+                    bj21 = B_data[k + 2][j + 1];
+                    bj22 = B_data[k + 2][j + 2];
+                    bj23 = B_data[k + 2][j + 3];
+                    bj30 = B_data[k + 3][j];
+                    bj31 = B_data[k + 3][j + 1];
+                    bj32 = B_data[k + 3][j + 2];
+                    bj33 = B_data[k + 3][j + 3];
 
-                    buffer_data[i][j] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
-                    buffer_data[i][j + 1] += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
-                    buffer_data[i][j + 2] += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
-                    buffer_data[i][j + 3] += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
+                    buffer_data[i][j + 1] = buffer_data[i][j + 1] + ai00 * bj01 + ai01 * bj11 + ai02 * bj21 + ai03 * bj31;
+                    buffer_data[i][j + 2] = buffer_data[i][j + 2] + ai00 * bj02 + ai01 * bj12 + ai02 * bj22 + ai03 * bj32;
+                    buffer_data[i][j + 3] = buffer_data[i][j + 3] + ai00 * bj03 + ai01 * bj13 + ai02 * bj23 + ai03 * bj33;
 
-                    buffer_data[i + 1][j] += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
-                    buffer_data[i + 1][j + 1] += a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31;
-                    buffer_data[i + 1][j + 2] += a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32;
-                    buffer_data[i + 1][j + 3] += a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
+                    buffer_data[i + 1][j] = buffer_data[i + 1][j] + ai10 * bj00 + ai11 * bj10 + ai12 * bj20 + ai13 * bj30;
+                    buffer_data[i + 1][j + 1] = buffer_data[i + 1][j + 1] + ai10 * bj01 + ai11 * bj11 + ai12 * bj21 + ai13 * bj31;
+                    buffer_data[i + 1][j + 2] = buffer_data[i + 1][j + 2] + ai10 * bj02 + ai11 * bj12 + ai12 * bj22 + ai13 * bj32;
+                    buffer_data[i + 1][j + 3] = buffer_data[i + 1][j + 3] + ai10 * bj03 + ai11 * bj13 + ai12 * bj23 + ai13 * bj33;
 
-                    buffer_data[i + 2][j] += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
-                    buffer_data[i + 2][j + 1] += a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31;
-                    buffer_data[i + 2][j + 2] += a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32;
-                    buffer_data[i + 2][j + 3] += a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
+                    buffer_data[i + 2][j] = buffer_data[i + 2][j] + ai20 * bj00 + ai21 * bj10 + ai22 * bj20 + ai23 * bj30;
+                    buffer_data[i + 2][j + 1] = buffer_data[i + 2][j + 1] + ai20 * bj01 + ai21 * bj11 + ai22 * bj21 + ai23 * bj31;
+                    buffer_data[i + 2][j + 2] = buffer_data[i + 2][j + 2] + ai20 * bj02 + ai21 * bj12 + ai22 * bj22 + ai23 * bj32;
+                    buffer_data[i + 2][j + 3] = buffer_data[i + 2][j + 3] + ai20 * bj03 + ai21 * bj13 + ai22 * bj23 + ai23 * bj33;
 
-                    buffer_data[i + 3][j] += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
-                    buffer_data[i + 3][j + 1] += a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31;
-                    buffer_data[i + 3][j + 2] += a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32;
-                    buffer_data[i + 3][j + 3] += a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
+                    buffer_data[i + 3][j] = buffer_data[i + 3][j] + ai30 * bj00 + ai31 * bj10 + ai32 * bj20 + ai33 * bj30;
+                    buffer_data[i + 3][j + 1] = buffer_data[i + 3][j + 1] + ai30 * bj01 + ai31 * bj11 + ai32 * bj21 + ai33 * bj31;
+                    buffer_data[i + 3][j + 2] = buffer_data[i + 3][j + 2] + ai30 * bj02 + ai31 * bj12 + ai32 * bj22 + ai33 * bj32;
+                    buffer_data[i + 3][j + 3] = buffer_data[i + 3][j + 3] + ai30 * bj03 + ai31 * bj13 + ai32 * bj23 + ai33 * bj33;
                 }
+
+                // For elelments in remaining j columns
+                for (j = NCB0; j < B.columns; j++)
+                {
+                    bj00 = B_data[k][j];
+                    bj10 = B_data[k + 1][j];
+                    bj20 = B_data[k + 2][j];
+                    bj30 = B_data[k + 3][j];
+                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
+                    buffer_data[i + 1][j] = buffer_data[i + 1][j] + ai10 * bj00 + ai11 * bj10 + ai12 * bj20 + ai13 * bj30;
+                    buffer_data[i + 2][j] = buffer_data[i + 2][j] + ai20 * bj00 + ai21 * bj10 + ai22 * bj20 + ai23 * bj30;
+                    buffer_data[i + 3][j] = buffer_data[i + 3][j] + ai30 * bj00 + ai31 * bj10 + ai32 * bj20 + ai33 * bj30;
+                }
+            }
+
+            // for the remaining k
+            for (k = NCA0; k < A.columns; k++)
+            {
+                ai00 = A_data[i][k];
+                ai10 = A_data[i + 1][k];
+                ai20 = A_data[i + 2][k];
+                ai30 = A_data[i + 3][k];
+
+                for (j = 0; j < NCB0; j += 4)
+                {
+                    bj00 = B_data[k][j];
+                    bj01 = B_data[k][j + 1];
+                    bj02 = B_data[k][j + 2];
+                    bj03 = B_data[k][j + 3];
+
+                    buffer_data[i][j] += ai00 * bj00;
+                    buffer_data[i][j + 1] += ai00 * bj01;
+                    buffer_data[i][j + 2] += ai00 * bj02;
+                    buffer_data[i][j + 3] += ai00 * bj03;
+
+                    buffer_data[i + 1][j] += ai10 * bj00;
+                    buffer_data[i + 1][j + 1] += ai10 * bj01;
+                    buffer_data[i + 1][j + 2] += ai10 * bj02;
+                    buffer_data[i + 1][j + 3] += ai10 * bj03;
+
+                    buffer_data[i + 2][j] += ai20 * bj00;
+                    buffer_data[i + 2][j + 1] += ai20 * bj01;
+                    buffer_data[i + 2][j + 2] += ai20 * bj02;
+                    buffer_data[i + 2][j + 3] += ai20 * bj03;
+
+                    buffer_data[i + 3][j] += ai30 * bj00;
+                    buffer_data[i + 3][j + 1] += ai30 * bj01;
+                    buffer_data[i + 3][j + 2] += ai30 * bj02;
+                    buffer_data[i + 3][j + 3] += ai30 * bj03;
+                }
+
+                // For elelments in remaining j columns
+                for (j = NCB0; j < B.columns; j++)
+                {
+                    bj00 = B_data[k][j];
+                    buffer_data[i][j] += ai00 * bj00;
+                    buffer_data[i + 1][j] += ai10 * bj00;
+                    buffer_data[i + 2][j] += ai20 * bj00;
+                    buffer_data[i + 3][j] += ai30 * bj00;
+                }
+            }
+        }
+
+        // For elements in remaining i rows
+        for (i = NRA0; i < A.rows; i++)
+        {
+            for (k = 0; k < NCA0; k += 4)
+            {
+                ai00 = A_data[i][k];
+                ai01 = A_data[i][k + 1];
+                ai02 = A_data[i][k + 2];
+                ai03 = A_data[i][k + 3];
+                for (j = 0; j < NCB0; j += 4)
+                {
+                    bj00 = B_data[k][j];
+                    bj01 = B_data[k][j + 1];
+                    bj02 = B_data[k][j + 2];
+                    bj03 = B_data[k][j + 3];
+                    bj10 = B_data[k + 1][j];
+                    bj11 = B_data[k + 1][j + 1];
+                    bj12 = B_data[k + 1][j + 2];
+                    bj13 = B_data[k + 1][j + 3];
+                    bj20 = B_data[k + 2][j];
+                    bj21 = B_data[k + 2][j + 1];
+                    bj22 = B_data[k + 2][j + 2];
+                    bj23 = B_data[k + 2][j + 3];
+                    bj30 = B_data[k + 3][j];
+                    bj31 = B_data[k + 3][j + 1];
+                    bj32 = B_data[k + 3][j + 2];
+                    bj33 = B_data[k + 3][j + 3];
+
+                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
+                    buffer_data[i][j + 1] = buffer_data[i][j + 1] + ai00 * bj01 + ai01 * bj11 + ai02 * bj21 + ai03 * bj31;
+                    buffer_data[i][j + 2] = buffer_data[i][j + 2] + ai00 * bj02 + ai01 * bj12 + ai02 * bj22 + ai03 * bj32;
+                    buffer_data[i][j + 3] = buffer_data[i][j + 3] + ai00 * bj03 + ai01 * bj13 + ai02 * bj23 + ai03 * bj33;
+                }
+
+                // For elelments in remaining j columns
+                for (j = NCB0; j < B.columns; j++)
+                {
+                    bj00 = B_data[k][j];
+                    bj10 = B_data[k + 1][j];
+                    bj20 = B_data[k + 2][j];
+                    bj30 = B_data[k + 3][j];
+                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
+                }
+            }
+
+            // for the remaining k
+            for (k = NCA0; k < A.columns; k++)
+            {
+                ai00 = A_data[i][k];
+                for (j = 0; j < B.columns; j++)
+                    buffer_data[i][j] += ai00 * B_data[k][j];
             }
         }
         gettimeofday(&end_time, 0);
         seconds = end_time.tv_sec - start_time.tv_sec;
         microseconds = end_time.tv_usec - start_time.tv_usec;
         elapsed = seconds + 1e-6 * microseconds;
-        printf("matmul with unrolled by the factor of 4 double tajes %f seconds to finish the computation.\n\n", elapsed);
+        printf("matmul with unrolled by the factor of 4 double takes %f seconds to finish the computation.\n\n", elapsed);
     }
     else
     {
         gettimeofday(&start_time, 0);
-        float a00, a01, a02, a03, a10, a11, a12, a13, a20, a21, a22, a23, a30, a31, a32, a33;
-        float b00, b01, b02, b03, b10, b11, b12, b13, b20, b21, b22, b23, b30, b31, b32, b33;
+        float ai00, ai01, ai02, ai03, ai10, ai11, ai12, ai13, ai20, ai21, ai22, ai23, ai30, ai31, ai32, ai33;
+        float bj00, bj01, bj02, bj03, bj10, bj11, bj12, bj13, bj20, bj21, bj22, bj23, bj30, bj31, bj32, bj33;
 
         float **buffer_data = ((float **)Buffer.data);
         float **A_data = (float **)A.data;
         float **B_data = (float **)B.data;
 
-        for (int i = 0; i < A.rows; i += 4)
+        int i, j, k;
+        int NRA0 = A.rows / 4 * 4;
+        int NCA0 = A.columns / 4 * 4;
+        int NCB0 = B.columns / 4 * 4;
+
+        for (i = 0; i < NRA0; i += 4)
         {
-            for (int k = 0; k < A.columns; k += 4)
+            for (k = 0; k < NCA0; k += 4)
             {
-                a00 = A_data[i][k], a01 = A_data[i][k + 1], a02 = A_data[i][k + 2], a03 = A_data[i][k + 3];
-                a10 = A_data[i + 1][k], a11 = A_data[i + 1][k + 1], a12 = A_data[i + 1][k + 2], a13 = A_data[i + 1][k + 3];
-                a20 = A_data[i + 2][k], a21 = A_data[i + 2][k + 1], a22 = A_data[i + 2][k + 2], a23 = A_data[i + 2][k + 3];
-                a30 = A_data[i + 3][k], a31 = A_data[i + 3][k + 1], a32 = A_data[i + 3][k + 2], a33 = A_data[i + 3][k + 3];
-                for (int j = 0; j < B.columns; j += 4)
+                ai00 = A_data[i][k];
+                ai01 = A_data[i][k + 1];
+                ai02 = A_data[i][k + 2];
+                ai03 = A_data[i][k + 3];
+                ai10 = A_data[i + 1][k];
+                ai11 = A_data[i + 1][k + 1];
+                ai12 = A_data[i + 1][k + 2];
+                ai13 = A_data[i + 1][k + 3];
+                ai20 = A_data[i + 2][k];
+                ai21 = A_data[i + 2][k + 1];
+                ai22 = A_data[i + 2][k + 2];
+                ai23 = A_data[i + 2][k + 3];
+                ai30 = A_data[i + 3][k];
+                ai31 = A_data[i + 3][k + 1];
+                ai32 = A_data[i + 3][k + 2];
+                ai33 = A_data[i + 3][k + 3];
+
+                for (j = 0; j < NCB0; j += 4)
                 {
-                    b00 = B_data[k][j], b01 = B_data[k][j + 1], b02 = B_data[k][j + 2], b03 = B_data[k][j + 3];
-                    b10 = B_data[k + 1][j], b11 = B_data[k + 1][j + 1], b12 = B_data[k + 1][j + 2], b13 = B_data[k + 1][j + 3];
-                    b20 = B_data[k + 2][j], b21 = B_data[k + 2][j + 1], b22 = B_data[k + 2][j + 2], b23 = B_data[k + 2][j + 3];
-                    b30 = B_data[k + 3][j], b31 = B_data[k + 3][j + 1], b32 = B_data[k + 3][j + 2], b33 = B_data[k + 3][j + 3];
+                    bj00 = B_data[k][j];
+                    bj01 = B_data[k][j + 1];
+                    bj02 = B_data[k][j + 2];
+                    bj03 = B_data[k][j + 3];
+                    bj10 = B_data[k + 1][j];
+                    bj11 = B_data[k + 1][j + 1];
+                    bj12 = B_data[k + 1][j + 2];
+                    bj13 = B_data[k + 1][j + 3];
+                    bj20 = B_data[k + 2][j];
+                    bj21 = B_data[k + 2][j + 1];
+                    bj22 = B_data[k + 2][j + 2];
+                    bj23 = B_data[k + 2][j + 3];
+                    bj30 = B_data[k + 3][j];
+                    bj31 = B_data[k + 3][j + 1];
+                    bj32 = B_data[k + 3][j + 2];
+                    bj33 = B_data[k + 3][j + 3];
 
-                    buffer_data[i][j] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
-                    buffer_data[i][j + 1] += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
-                    buffer_data[i][j + 2] += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
-                    buffer_data[i][j + 3] += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
+                    buffer_data[i][j + 1] = buffer_data[i][j + 1] + ai00 * bj01 + ai01 * bj11 + ai02 * bj21 + ai03 * bj31;
+                    buffer_data[i][j + 2] = buffer_data[i][j + 2] + ai00 * bj02 + ai01 * bj12 + ai02 * bj22 + ai03 * bj32;
+                    buffer_data[i][j + 3] = buffer_data[i][j + 3] + ai00 * bj03 + ai01 * bj13 + ai02 * bj23 + ai03 * bj33;
 
-                    buffer_data[i + 1][j] += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
-                    buffer_data[i + 1][j + 1] += a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31;
-                    buffer_data[i + 1][j + 2] += a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32;
-                    buffer_data[i + 1][j + 3] += a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
+                    buffer_data[i + 1][j] = buffer_data[i + 1][j] + ai10 * bj00 + ai11 * bj10 + ai12 * bj20 + ai13 * bj30;
+                    buffer_data[i + 1][j + 1] = buffer_data[i + 1][j + 1] + ai10 * bj01 + ai11 * bj11 + ai12 * bj21 + ai13 * bj31;
+                    buffer_data[i + 1][j + 2] = buffer_data[i + 1][j + 2] + ai10 * bj02 + ai11 * bj12 + ai12 * bj22 + ai13 * bj32;
+                    buffer_data[i + 1][j + 3] = buffer_data[i + 1][j + 3] + ai10 * bj03 + ai11 * bj13 + ai12 * bj23 + ai13 * bj33;
 
-                    buffer_data[i + 2][j] += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
-                    buffer_data[i + 2][j + 1] += a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31;
-                    buffer_data[i + 2][j + 2] += a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32;
-                    buffer_data[i + 2][j + 3] += a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
+                    buffer_data[i + 2][j] = buffer_data[i + 2][j] + ai20 * bj00 + ai21 * bj10 + ai22 * bj20 + ai23 * bj30;
+                    buffer_data[i + 2][j + 1] = buffer_data[i + 2][j + 1] + ai20 * bj01 + ai21 * bj11 + ai22 * bj21 + ai23 * bj31;
+                    buffer_data[i + 2][j + 2] = buffer_data[i + 2][j + 2] + ai20 * bj02 + ai21 * bj12 + ai22 * bj22 + ai23 * bj32;
+                    buffer_data[i + 2][j + 3] = buffer_data[i + 2][j + 3] + ai20 * bj03 + ai21 * bj13 + ai22 * bj23 + ai23 * bj33;
 
-                    buffer_data[i + 3][j] += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
-                    buffer_data[i + 3][j + 1] += a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31;
-                    buffer_data[i + 3][j + 2] += a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32;
-                    buffer_data[i + 3][j + 3] += a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
+                    buffer_data[i + 3][j] = buffer_data[i + 3][j] + ai30 * bj00 + ai31 * bj10 + ai32 * bj20 + ai33 * bj30;
+                    buffer_data[i + 3][j + 1] = buffer_data[i + 3][j + 1] + ai30 * bj01 + ai31 * bj11 + ai32 * bj21 + ai33 * bj31;
+                    buffer_data[i + 3][j + 2] = buffer_data[i + 3][j + 2] + ai30 * bj02 + ai31 * bj12 + ai32 * bj22 + ai33 * bj32;
+                    buffer_data[i + 3][j + 3] = buffer_data[i + 3][j + 3] + ai30 * bj03 + ai31 * bj13 + ai32 * bj23 + ai33 * bj33;
                 }
+
+                // For elelments in remaining j columns
+                for (j = NCB0; j < B.columns; j++)
+                {
+                    bj00 = B_data[k][j];
+                    bj10 = B_data[k + 1][j];
+                    bj20 = B_data[k + 2][j];
+                    bj30 = B_data[k + 3][j];
+                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
+                    buffer_data[i + 1][j] = buffer_data[i + 1][j] + ai10 * bj00 + ai11 * bj10 + ai12 * bj20 + ai13 * bj30;
+                    buffer_data[i + 2][j] = buffer_data[i + 2][j] + ai20 * bj00 + ai21 * bj10 + ai22 * bj20 + ai23 * bj30;
+                    buffer_data[i + 3][j] = buffer_data[i + 3][j] + ai30 * bj00 + ai31 * bj10 + ai32 * bj20 + ai33 * bj30;
+                }
+            }
+
+            // for the remaining k
+            for (k = NCA0; k < A.columns; k++)
+            {
+                ai00 = A_data[i][k];
+                ai10 = A_data[i + 1][k];
+                ai20 = A_data[i + 2][k];
+                ai30 = A_data[i + 3][k];
+
+                for (j = 0; j < NCB0; j += 4)
+                {
+                    bj00 = B_data[k][j];
+                    bj01 = B_data[k][j + 1];
+                    bj02 = B_data[k][j + 2];
+                    bj03 = B_data[k][j + 3];
+
+                    buffer_data[i][j] += ai00 * bj00;
+                    buffer_data[i][j + 1] += ai00 * bj01;
+                    buffer_data[i][j + 2] += ai00 * bj02;
+                    buffer_data[i][j + 3] += ai00 * bj03;
+
+                    buffer_data[i + 1][j] += ai10 * bj00;
+                    buffer_data[i + 1][j + 1] += ai10 * bj01;
+                    buffer_data[i + 1][j + 2] += ai10 * bj02;
+                    buffer_data[i + 1][j + 3] += ai10 * bj03;
+
+                    buffer_data[i + 2][j] += ai20 * bj00;
+                    buffer_data[i + 2][j + 1] += ai20 * bj01;
+                    buffer_data[i + 2][j + 2] += ai20 * bj02;
+                    buffer_data[i + 2][j + 3] += ai20 * bj03;
+
+                    buffer_data[i + 3][j] += ai30 * bj00;
+                    buffer_data[i + 3][j + 1] += ai30 * bj01;
+                    buffer_data[i + 3][j + 2] += ai30 * bj02;
+                    buffer_data[i + 3][j + 3] += ai30 * bj03;
+                }
+
+                // For elelments in remaining j columns
+                for (j = NCB0; j < B.columns; j++)
+                {
+                    bj00 = B_data[k][j];
+                    buffer_data[i][j] += ai00 * bj00;
+                    buffer_data[i + 1][j] += ai10 * bj00;
+                    buffer_data[i + 2][j] += ai20 * bj00;
+                    buffer_data[i + 3][j] += ai30 * bj00;
+                }
+            }
+        }
+
+        // For elements in remaining i rows
+        for (i = NRA0; i < A.rows; i++)
+        {
+            for (k = 0; k < NCA0; k += 4)
+            {
+                ai00 = A_data[i][k];
+                ai01 = A_data[i][k + 1];
+                ai02 = A_data[i][k + 2];
+                ai03 = A_data[i][k + 3];
+                for (j = 0; j < NCB0; j += 4)
+                {
+                    bj00 = B_data[k][j];
+                    bj01 = B_data[k][j + 1];
+                    bj02 = B_data[k][j + 2];
+                    bj03 = B_data[k][j + 3];
+                    bj10 = B_data[k + 1][j];
+                    bj11 = B_data[k + 1][j + 1];
+                    bj12 = B_data[k + 1][j + 2];
+                    bj13 = B_data[k + 1][j + 3];
+                    bj20 = B_data[k + 2][j];
+                    bj21 = B_data[k + 2][j + 1];
+                    bj22 = B_data[k + 2][j + 2];
+                    bj23 = B_data[k + 2][j + 3];
+                    bj30 = B_data[k + 3][j];
+                    bj31 = B_data[k + 3][j + 1];
+                    bj32 = B_data[k + 3][j + 2];
+                    bj33 = B_data[k + 3][j + 3];
+
+                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
+                    buffer_data[i][j + 1] = buffer_data[i][j + 1] + ai00 * bj01 + ai01 * bj11 + ai02 * bj21 + ai03 * bj31;
+                    buffer_data[i][j + 2] = buffer_data[i][j + 2] + ai00 * bj02 + ai01 * bj12 + ai02 * bj22 + ai03 * bj32;
+                    buffer_data[i][j + 3] = buffer_data[i][j + 3] + ai00 * bj03 + ai01 * bj13 + ai02 * bj23 + ai03 * bj33;
+                }
+
+                // For elelments in remaining j columns
+                for (j = NCB0; j < B.columns; j++)
+                {
+                    bj00 = B_data[k][j];
+                    bj10 = B_data[k + 1][j];
+                    bj20 = B_data[k + 2][j];
+                    bj30 = B_data[k + 3][j];
+                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
+                }
+            }
+
+            // for the remaining k
+            for (k = NCA0; k < A.columns; k++)
+            {
+                ai00 = A_data[i][k];
+                for (j = 0; j < B.columns; j++)
+                    buffer_data[i][j] += ai00 * B_data[k][j];
             }
         }
         gettimeofday(&end_time, 0);
@@ -363,12 +651,30 @@ void compareMatrix(Matrix A, Matrix B)
 
     printf("Starting comparison\n\n");
     int cnt = 0;
-    double **A_data = ((double **)A.data);
-    double **B_data = ((double **)B.data);
-    for (int i = 0; i < A.rows; i++)
-        for (int j = 0; j < A.columns; j++)
-            if ((A_data[i][j] - B_data[i][j]) * (A_data[i][j] - B_data[i][j]) > 1.0E-10)
-                cnt++;
+    if (IS_DOUBLE)
+    {
+        double **A_data = ((double **)A.data);
+        double **B_data = ((double **)B.data);
+        for (int i = 0; i < A.rows; i++)
+            for (int j = 0; j < A.columns; j++)
+                if ((A_data[i][j] - B_data[i][j]) * (A_data[i][j] - B_data[i][j]) > 1.0E-10)
+                {
+                    printf("%.6f\n", (A_data[i][j] - B_data[i][j]) * (A_data[i][j] - B_data[i][j]));
+                    cnt++;
+                }
+    }
+    else
+    {
+        float **A_data = ((float **)A.data);
+        float **B_data = ((float **)B.data);
+        for (int i = 0; i < A.rows; i++)
+            for (int j = 0; j < A.columns; j++)
+                if ((A_data[i][j] - B_data[i][j]) * (A_data[i][j] - B_data[i][j]) > 1.0E-10)
+                {
+                    printf("%.6f\n", (A_data[i][j] - B_data[i][j]) * (A_data[i][j] - B_data[i][j]));
+                    cnt++;
+                }
+    }
     if (cnt == 0)
         printf("Done. There are no differences!\n");
     else
@@ -410,7 +716,7 @@ int main(int argc, char *argv[])
     int m, k, l, n;
     char *endptr;
     char *mode;
-    Matrix MatA, MatB, MatC, MatD;
+    Matrix MatA, MatB, MatC, MatD, MatD2;
     // Get the Input arguments
     m = strtol(argv[1], &endptr, 10);
     if (endptr == argv[1] || *endptr != '\0')
@@ -442,6 +748,14 @@ int main(int argc, char *argv[])
         fprintf(stderr, "The fifth argument is incorrect!");
         return -1;
     }
+    if (strcmp(mode, "double") == 0)
+    {
+        IS_DOUBLE = 1;
+    }
+    else
+    {
+        IS_DOUBLE = 0;
+    }
 
     NUM_THREADS = strtol(argv[6], &endptr, 10);
     if (endptr == argv[6] || *endptr != '\0' || NUM_THREADS > 64 || NUM_THREADS < 0)
@@ -455,7 +769,9 @@ int main(int argc, char *argv[])
     initializeMatrixRandomNumber(&MatB, k, l);
     initializeMatrixRandomNumber(&MatC, l, n);
     initializeMatrix(&MatD, m, n); // Init with all zeros
+    initializeMatrix(&MatD2, m, n);
 
+    printf("Is double : %d\n", IS_DOUBLE);
     // Display first 4x4 Matrix
     printf("Printing Matrix A\n");
     printMatrix(MatA, 4, 4);
@@ -467,11 +783,8 @@ int main(int argc, char *argv[])
     printMatrix(MatD, 4, 4);
 
     matrixMulSequencial(MatA, MatB, MatC, MatD);
-    printMatrix(MatD, 4, 4);
+    matrixMulUnrolledSequencial(MatA, MatB, MatC, MatD2);
 
-    resetMatrix(MatD);
-    matrixMulUnrolledSequencial(MatA, MatB, MatC, MatD);
-    printMatrix(MatD, 4, 4);
-
+    compareMatrix(MatD, MatD2);
     return 0;
 }
