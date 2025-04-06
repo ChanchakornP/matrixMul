@@ -26,7 +26,14 @@ typedef struct
     int end_col;
 } t_arg;
 
-int NUM_THREADS, M_BLOCK, N_BLOCK; // Assume NUM_THREAD >= M_BLOCK * N_BLOCK
+int NUM_THREADS;
+
+void print_memory_usage()
+{
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    printf("Memory usage: %ld KB\n", usage.ru_maxrss);
+}
 
 void freeMatrix(matrix *A)
 {
@@ -398,6 +405,7 @@ void matrixMulLoopUnrollingFloat(matrix A, matrix B, matrix Result)
 void *_matrixMulLoopUnrollingParallelDouble(void *arg)
 {
     t_arg *args = (t_arg *)arg;
+
     double **A_data = (double **)args->A.data;
     double **B_data = (double **)args->B.data;
     double **Result_data = (double **)args->Result.data;
@@ -412,6 +420,7 @@ void *_matrixMulLoopUnrollingParallelDouble(void *arg)
     int last_row_A_to_unroll = (end_row - start_row) / UnrollingFactor * UnrollingFactor + start_row;
     int last_col_A_to_unroll = args->A.columns / UnrollingFactor * UnrollingFactor;
     int last_col_B_to_unroll = (end_col - start_col) / UnrollingFactor * UnrollingFactor + start_col;
+
     for (i = start_row; i < last_row_A_to_unroll; i += UnrollingFactor)
     {
         for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
@@ -451,6 +460,7 @@ void *_matrixMulLoopUnrollingParallelDouble(void *arg)
             // If column B is indivisible by unrolling factor. This do the rest.
             for (k = last_col_B_to_unroll; k < end_col; k++)
             {
+
                 b00 = B_data[j][k];
                 b10 = B_data[j + 1][k];
                 b20 = B_data[j + 2][k];
@@ -462,6 +472,7 @@ void *_matrixMulLoopUnrollingParallelDouble(void *arg)
             }
         }
         // If column A is indivisible by unrolling factor. This do the rest, while keep k unrolling.
+
         for (j = last_col_A_to_unroll; j < args->A.columns; j++)
         {
             a00 = A_data[i][j];
@@ -502,8 +513,10 @@ void *_matrixMulLoopUnrollingParallelDouble(void *arg)
             }
         }
     }
+
     for (i = last_row_A_to_unroll; i < end_row; i++)
     {
+
         for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
         {
             a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
@@ -566,6 +579,7 @@ void *_matrixMulLoopUnrollingParallelFloat(void *arg)
     int last_row_A_to_unroll = (end_row - start_row) / UnrollingFactor * UnrollingFactor + start_row;
     int last_col_A_to_unroll = args->A.columns / UnrollingFactor * UnrollingFactor;
     int last_col_B_to_unroll = (end_col - start_col) / UnrollingFactor * UnrollingFactor + start_col;
+
     for (i = start_row; i < last_row_A_to_unroll; i += UnrollingFactor)
     {
         for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
@@ -729,16 +743,21 @@ void compareMatrix(matrix A, matrix B)
         float **B_data = ((float **)B.data);
         for (int i = 0; i < A.rows; i++)
             for (int j = 0; j < A.columns; j++)
-                if ((A_data[i][j] - B_data[i][j]) * (A_data[i][j] - B_data[i][j]) > 1.0E-6)
+            {
+                // https://randomascii.wordpress.com/2012/02/25/comparing-floating-point-numbers-2012-edition/
+                float diff = fabsf(A_data[i][j] - B_data[i][j]);
+                float maxVal = fmaxf(fabsf(A_data[i][j]), fabsf(B_data[i][j]));
+                if (diff > 1e-3 && diff / (maxVal + 1e-6) > 1e-3)
                 {
-                    printf("%.6f\n", (A_data[i][j] - B_data[i][j]) * (A_data[i][j] - B_data[i][j]));
+                    printf("%.3f\n", fabs(A_data[i][j] - B_data[i][j]));
                     cnt++;
                 }
+            }
+        if (cnt == 0)
+            printf("Done. There are no differences!\n\n");
+        else
+            printf("Results are incorrect! The number of different elements is %d\n\n", cnt);
     }
-    if (cnt == 0)
-        printf("Done. There are no differences!\n\n");
-    else
-        printf("Results are incorrect! The number of different elements is %d\n\n", cnt);
 }
 
 void initializeMatrixWithRandom(matrix *mat, int rows, int columns)
@@ -825,123 +844,123 @@ void initializeMatrixWithZero(matrix *mat, int rows, int columns)
 
 void matrixMulSeq(matrix A, matrix B, matrix C, matrix D)
 {
-    int cost1 = A.rows * A.columns * B.columns + A.columns * C.rows * C.columns; // cost of (A*B)*C
+    int cost1 = A.rows * A.columns * B.columns + A.rows * B.columns * C.columns; // cost of (A*B)*C
     int cost2 = B.rows * B.columns * C.columns + A.rows * A.columns * C.columns; // cost of A*(B*C)
     matrix TMP;
-    void (*matrixMul)(matrix A, matrix B, matrix Result);
-    if (IS_DOUBLE)
+    struct timeval start_time, end_time;
+    float seconds, microseconds, elapsed;
+    void (*matrixMul)(matrix A, matrix B, matrix Result) = IS_DOUBLE ? matrixMulDouble : matrixMulFloat;
+    if (cost1 <= cost2)
     {
-        matrixMul = matrixMulLoopUnrollingDouble;
+        // Compute (AxB)xC
+        initializeMatrixWithZero(&TMP, A.rows, B.columns);
+        gettimeofday(&start_time, 0);
+        matrixMul(A, B, TMP);
+        matrixMul(TMP, C, D);
+        gettimeofday(&end_time, 0);
     }
     else
     {
-        matrixMul = matrixMulLoopUnrollingFloat;
+        // Compute Ax(BxC)
+        initializeMatrixWithZero(&TMP, B.rows, C.columns);
+        gettimeofday(&start_time, 0);
+        matrixMul(B, C, TMP);
+        matrixMul(A, TMP, D);
+        gettimeofday(&end_time, 0);
     }
-    initializeMatrixWithZero(&TMP, A.rows, B.columns);
 
-    struct timeval start_time, end_time;
-    float seconds, microseconds, elapsed;
-    gettimeofday(&start_time, 0);
-    matrixMul(A, B, TMP);
-    matrixMul(TMP, C, D);
-    gettimeofday(&end_time, 0);
     seconds = end_time.tv_sec - start_time.tv_sec;
     microseconds = end_time.tv_usec - start_time.tv_usec;
     elapsed = seconds + 1e-6 * microseconds;
-    printf("Parallel computing takes %f seconds to finish the computation.\n\n", elapsed);
+    printf("Sequential computing takes %f seconds to finish the computation.\n\n", elapsed);
 
     freeMatrix(&TMP);
 }
 
+double runParallelMultiplication(matrix A, matrix B, matrix Result, int num_threads_row, int num_threads_col, void *(*worker)(void *), t_arg args[][num_threads_col], pthread_t threads[][num_threads_col])
+{
+    int block_size_row = Result.rows / num_threads_row;
+    int block_size_col = Result.columns / num_threads_col;
+    double elapsed = 0.0;
+
+    for (int i = 0; i < num_threads_row; i++)
+    {
+        for (int j = 0; j < num_threads_col; j++)
+        {
+            int start_row = block_size_row * i;
+            int start_col = block_size_col * j;
+            int end_row = (i == num_threads_row - 1) ? Result.rows : block_size_row * (i + 1);
+            int end_col = (j == num_threads_col - 1) ? Result.columns : block_size_col * (j + 1);
+
+            args[i][j].A = A;
+            args[i][j].B = B;
+            args[i][j].Result = Result;
+            args[i][j].start_row = start_row;
+            args[i][j].start_col = start_col;
+            args[i][j].end_row = end_row;
+            args[i][j].end_col = end_col;
+        }
+    }
+
+    struct timeval start_time, end_time;
+    gettimeofday(&start_time, 0);
+    for (int i = 0; i < num_threads_row; i++)
+    {
+        for (int j = 0; j < num_threads_col; j++)
+        {
+            if (pthread_create(&threads[i][j], NULL, worker, (void *)&args[i][j]) != 0)
+            {
+                fprintf(stderr, "Thread create failed\n");
+                exit(EXIT_FAILURE);
+            }
+        }
+    }
+    for (int i = 0; i < num_threads_row; i++)
+    {
+        for (int j = 0; j < num_threads_col; j++)
+        {
+            pthread_join(threads[i][j], NULL);
+        }
+    }
+    gettimeofday(&end_time, 0);
+    return elapsed;
+}
+
 void matrixMulParallel(matrix A, matrix B, matrix C, matrix D)
 {
-    // In the case dimension is indivisible by num_threads, last thread will handle the rest
-    int num_threads_col = sqrt(NUM_THREADS);
-    int num_threads_row = NUM_THREADS / num_threads_col;
-    pthread_t threads[num_threads_col][num_threads_row];
+    int num_threads_row = NUM_THREADS / sqrt(NUM_THREADS);
+    int num_threads_col = NUM_THREADS / num_threads_row;
+    // printf("Number thread col = %d\nNumber thread row = %d\n", num_threads_col, num_threads_row);
+
+    pthread_t threads[num_threads_row][num_threads_col];
     t_arg arg[num_threads_row][num_threads_col];
+
     matrix TMP;
-    int cost1 = A.rows * A.columns * B.columns + A.columns * C.rows * C.columns; // cost of (A*B)*C
+    struct timeval start_time, end_time;
+    float seconds, microseconds, elapsed;
+
+    int cost1 = A.rows * A.columns * B.columns + A.rows * B.columns * C.columns; // cost of (A*B)*C
     int cost2 = B.rows * B.columns * C.columns + A.rows * A.columns * C.columns; // cost of A*(B*C)
-    void *(*_matrixMulLoopUnrollingParallel)(void *arg);
-    if (IS_DOUBLE)
+
+    void *(*_matrixMulLoopUnrollingParallel)(void *arg) = IS_DOUBLE ? _matrixMulLoopUnrollingParallelDouble : _matrixMulLoopUnrollingParallelFloat;
+
+    if (cost1 <= cost2)
     {
-        _matrixMulLoopUnrollingParallel = _matrixMulLoopUnrollingParallelDouble;
+        // Compute (A*B)*C
+        initializeMatrixWithZero(&TMP, A.rows, B.columns);
+        gettimeofday(&start_time, 0);
+        elapsed += runParallelMultiplication(A, B, TMP, num_threads_row, num_threads_col, _matrixMulLoopUnrollingParallel, arg, threads);
+        elapsed += runParallelMultiplication(TMP, C, D, num_threads_row, num_threads_col, _matrixMulLoopUnrollingParallel, arg, threads);
     }
     else
     {
-        _matrixMulLoopUnrollingParallel = _matrixMulLoopUnrollingParallelFloat;
-    }
-    // Assume cost1 < cost2
-    initializeMatrixWithZero(&TMP, A.rows, B.columns);
-
-    struct timeval start_time, end_time;
-    float seconds, microseconds, elapsed;
-    gettimeofday(&start_time, 0);
-
-    for (int i = 0; i < num_threads_row; i++)
-    {
-        for (int j = 0; j < num_threads_col; j++)
-        {
-            int block_size_row = TMP.rows / num_threads_row;
-            int block_size_col = TMP.columns / num_threads_col;
-            int start_row = block_size_row * i;
-            int start_col = block_size_col * j;
-            // If it is the last index -> C.rows
-            // else block_size_ * (_ + 1)
-            int end_row = i == num_threads_row - 1 ? TMP.rows : block_size_row * (i + 1);
-            int end_col = j == num_threads_col - 1 ? TMP.columns : block_size_col * (j + 1);
-            arg[i][j].A = A;
-            arg[i][j].B = B;
-            arg[i][j].Result = TMP;
-            arg[i][j].start_row = start_row;
-            arg[i][j].start_col = start_col;
-            arg[i][j].end_row = end_row;
-            arg[i][j].end_col = end_col;
-            // printf("Running Thread[%d][%d]\n", i, j);
-            // printf("start_row = %d start_col = %d\n", start_row, start_col);
-            // printf("end_row = %d  end_col = %d\n", end_row, end_col);
-            pthread_create(&threads[i][j], NULL, _matrixMulLoopUnrollingParallel, (void *)&arg[i][j]);
-        }
+        // Compute A*(B*C)
+        initializeMatrixWithZero(&TMP, B.rows, C.columns);
+        gettimeofday(&start_time, 0);
+        elapsed += runParallelMultiplication(B, C, TMP, num_threads_row, num_threads_col, _matrixMulLoopUnrollingParallel, arg, threads);
+        elapsed += runParallelMultiplication(A, TMP, D, num_threads_row, num_threads_col, _matrixMulLoopUnrollingParallel, arg, threads);
     }
 
-    for (int i = 0; i < num_threads_row; i++)
-        for (int j = 0; j < num_threads_col; j++)
-        {
-            pthread_join(threads[i][j], NULL);
-        }
-
-    // printf("Finish first matrix multiplication\n");
-    for (int i = 0; i < num_threads_row; i++)
-    {
-        for (int j = 0; j < num_threads_col; j++)
-        {
-            int block_size_row = D.rows / num_threads_row;
-            int block_size_col = D.columns / num_threads_col;
-            int start_row = block_size_row * i;
-            int start_col = block_size_col * j;
-            // If it is the last index -> C.rows
-            // else block_size_ * (_ + 1)
-            int end_row = i == num_threads_row - 1 ? D.rows : block_size_row * (i + 1);
-            int end_col = j == num_threads_col - 1 ? D.columns : block_size_col * (j + 1);
-            arg[i][j].A = TMP;
-            arg[i][j].B = C;
-            arg[i][j].Result = D;
-            arg[i][j].start_row = start_row;
-            arg[i][j].start_col = start_col;
-            arg[i][j].end_row = end_row;
-            arg[i][j].end_col = end_col;
-            // printf("Running Thread[%d][%d]\n", i, j);
-            // printf("start_row = %d start_col = %d\n", start_row, start_col);
-            // printf("end_row = %d  end_col = %d\n", end_row, end_col);
-            pthread_create(&threads[i][j], NULL, _matrixMulLoopUnrollingParallel, (void *)&arg[i][j]);
-        }
-    }
-    for (int i = 0; i < num_threads_row; i++)
-        for (int j = 0; j < num_threads_col; j++)
-        {
-            pthread_join(threads[i][j], NULL);
-        }
     gettimeofday(&end_time, 0);
     seconds = end_time.tv_sec - start_time.tv_sec;
     microseconds = end_time.tv_usec - start_time.tv_usec;
@@ -949,7 +968,6 @@ void matrixMulParallel(matrix A, matrix B, matrix C, matrix D)
     printf("Parallel computing takes %f seconds to finish the computation.\n\n", elapsed);
 
     freeMatrix(&TMP);
-    return;
 }
 
 int main(int argc, char *argv[])
@@ -959,6 +977,7 @@ int main(int argc, char *argv[])
     // check a number of inputs 1 + 6 = 7
     if (argc != 7)
     {
+        fprintf(stderr, "The input is incorrect!");
         return 1;
     }
 
@@ -1013,6 +1032,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    printf("User Inputs:\n\tSize %d %d %d %d\n\tmode=%s\n\tnum_threads=%d\n", m, k, l, n, mode, NUM_THREADS);
     matrix A, B, C, D, D2;
     initializeMatrixWithRandom(&A, m, k); // Init with random numbers (0-1).
     initializeMatrixWithRandom(&B, k, l);
@@ -1025,4 +1045,5 @@ int main(int argc, char *argv[])
     compareMatrix(D, D2);
     // printMatrix(D, 4, 4);
     // printMatrix(D2, 4, 4);
+    print_memory_usage();
 }
