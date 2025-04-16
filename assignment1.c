@@ -1,32 +1,104 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
 #include <sys/time.h>
 #include <pthread.h>
+#include <sys/resource.h>
+#include <math.h>
+
+#define UnrollingFactor 4
+#define ALIGNMENT 1024
+int IS_DOUBLE;
 typedef struct
 {
     void **data;
     int rows;
     int columns;
-} Matrix;
+} matrix;
 
 typedef struct
 {
-    Matrix A;
-    Matrix B;
-    Matrix C;
-    int thread_id;
-} thread_arg;
-bool IS_DOUBLE;
+    matrix A;
+    matrix B;
+    matrix Result;
+    int start_row;
+    int end_row;
+    int start_col;
+    int end_col;
+} t_arg;
+
 int NUM_THREADS;
 
-void initializeMatrix(Matrix *matrix, int rows, int columns);
-void freeMatrix(Matrix *matrix);
-void matrixMul(Matrix A, Matrix B, Matrix Buffer);
-void matrixMulSequencial(Matrix A, Matrix B, Matrix C, Matrix D);
-void matrixMulUnrolledSequencial(Matrix A, Matrix B, Matrix C, Matrix D);
-void printMatrix(Matrix A, int row, int col)
+void print_memory_usage()
+{
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+    printf("Memory usage: %ld KB\n", usage.ru_maxrss);
+}
+
+void freeMatrix(matrix *A)
+{
+    free(A->data[0]);
+    free(A->data);
+}
+
+float matrixMulDouble(matrix A, matrix B, matrix Result)
+{
+    float seconds, microseconds, elapsed;
+    struct timeval start_time, end_time;
+    double **A_data = (double **)A.data;
+    double **B_data = (double **)B.data;
+    double **Result_data = (double **)Result.data;
+    int row_A = A.rows, col_A = A.columns, col_B = B.columns;
+    gettimeofday(&start_time, 0);
+    for (int i = 0; i < row_A; i++)
+    {
+        for (int j = 0; j < col_A; j++)
+        {
+            for (int k = 0; k < col_B; k++)
+            {
+                Result_data[i][k] += A_data[i][j] * B_data[j][k];
+            }
+        }
+    }
+    gettimeofday(&end_time, 0);
+    // timer end here
+    seconds = end_time.tv_sec - start_time.tv_sec;
+    microseconds = end_time.tv_usec - start_time.tv_usec;
+    elapsed = seconds + 1e-6 * microseconds;
+    return elapsed;
+}
+
+float matrixMulFloat(matrix A, matrix B, matrix Result)
+{
+    float seconds, microseconds, elapsed;
+    struct timeval start_time, end_time;
+
+    float **A_data = (float **)A.data;
+    float **B_data = (float **)B.data;
+    float **Result_data = (float **)Result.data;
+    int row_A = A.rows, col_A = A.columns, col_B = B.columns;
+
+    gettimeofday(&start_time, 0);
+    for (int i = 0; i < row_A; i++)
+    {
+        for (int j = 0; j < col_A; j++)
+        {
+            for (int k = 0; k < col_B; k++)
+            {
+                Result_data[i][k] += A_data[i][j] * B_data[j][k];
+            }
+        }
+    }
+    gettimeofday(&end_time, 0);
+    // timer end here
+    seconds = end_time.tv_sec - start_time.tv_sec;
+    microseconds = end_time.tv_usec - start_time.tv_usec;
+    elapsed = seconds + 1e-6 * microseconds;
+    return elapsed;
+}
+
+void printMatrix(matrix A, int row, int col)
 {
     if (IS_DOUBLE)
     {
@@ -53,631 +125,1225 @@ void printMatrix(Matrix A, int row, int col)
     return;
 }
 
-void initializeMatrix(Matrix *matrix, int rows, int columns)
+float matrixMulLoopUnrollingDouble(matrix A, matrix B, matrix Result)
 {
-    if (IS_DOUBLE)
-    {
-        double *Buff0 = malloc(rows * columns * sizeof(double));
-        double **Buff = malloc(rows * sizeof(double *));
-        for (int i = 0; i < rows; i++)
-        {
-            Buff[i] = Buff0 + i * columns;
-        }
-        matrix->data = (void **)Buff;
-        for (int i = 0; i < rows; i++)
-        {
-            for (int j = 0; j < columns; j++)
-            {
-                ((double **)matrix->data)[i][j] = 0.0;
-            }
-        }
-    }
-    else
-    {
-        float *Buff0 = malloc(rows * columns * sizeof(float));
-        float **Buff = malloc(rows * sizeof(float *));
-        for (int i = 0; i < rows; i++)
-        {
-            Buff[i] = Buff0 + i * columns;
-        }
-        matrix->data = (void **)Buff;
-
-        for (int i = 0; i < rows; i++)
-        {
-            for (int j = 0; j < columns; j++)
-            {
-                ((float **)matrix->data)[i][j] = 0.0;
-            }
-        }
-    }
-    matrix->rows = rows;
-    matrix->columns = columns;
-}
-
-void initializeMatrixRandomNumber(Matrix *matrix, int rows, int columns)
-{
-    if (IS_DOUBLE)
-    {
-        double *Buff0 = malloc(rows * columns * sizeof(double));
-        double **Buff = malloc(rows * sizeof(double *));
-        for (int i = 0; i < rows; i++)
-        {
-            Buff[i] = Buff0 + i * columns;
-        }
-        matrix->data = (void **)Buff;
-        for (int i = 0; i < rows; i++)
-        {
-            for (int j = 0; j < columns; j++)
-            {
-                ((double **)matrix->data)[i][j] = (double)rand() / RAND_MAX;
-            }
-        }
-    }
-    else
-    {
-        float *Buff0 = malloc(rows * columns * sizeof(float));
-        float **Buff = malloc(rows * sizeof(float *));
-        for (int i = 0; i < rows; i++)
-        {
-            Buff[i] = Buff0 + i * columns;
-        }
-        matrix->data = (void **)Buff;
-
-        for (int i = 0; i < rows; i++)
-        {
-            for (int j = 0; j < columns; j++)
-            {
-                ((float **)matrix->data)[i][j] = (float)rand() / RAND_MAX;
-            }
-        }
-    }
-    matrix->rows = rows;
-    matrix->columns = columns;
-}
-
-void freeMatrix(Matrix *matrix)
-{
-    if (IS_DOUBLE)
-    {
-        free(((double **)matrix->data)[0]);
-        free(matrix->data);
-    }
-    else
-    {
-        free(((float **)matrix->data)[0]);
-        free(matrix->data);
-    }
-}
-
-void matrixMul(Matrix A, Matrix B, Matrix Buffer)
-{
-    // struct timeval start_time, end_time;
-    // float seconds, microseconds, elapsed;
-    if (IS_DOUBLE)
-    {
-        // gettimeofday(&start_time, 0);
-        double **buffer_data = ((double **)Buffer.data);
-        double **A_data = ((double **)A.data);
-        double **B_data = ((double **)B.data);
-        for (int i = 0; i < A.rows; i++)
-        {
-            for (int k = 0; k < A.columns; k++)
-            {
-                for (int j = 0; j < B.columns; j++)
-                {
-                    {
-                        buffer_data[i][j] += A_data[i][k] * B_data[k][j];
-                    }
-                }
-            }
-        }
-        // gettimeofday(&end_time, 0);
-        // seconds = end_time.tv_sec - start_time.tv_sec;
-        // microseconds = end_time.tv_usec - start_time.tv_usec;
-        // elapsed = seconds + 1e-6 * microseconds;
-        // printf("matmul double takes %f seconds to finish the computation.\n\n", elapsed);
-    }
-    else
-    {
-
-        // gettimeofday(&start_time, 0);
-        float **buffer_data = ((float **)Buffer.data);
-        float **A_data = ((float **)A.data);
-        float **B_data = ((float **)B.data);
-        for (int i = 0; i < A.rows; i++)
-        {
-            for (int k = 0; k < A.columns; k++)
-            {
-                for (int j = 0; j < B.columns; j++)
-                {
-                    {
-                        buffer_data[i][j] += A_data[i][k] * B_data[k][j];
-                    }
-                }
-            }
-        }
-        // gettimeofday(&end_time, 0);
-        // seconds = end_time.tv_sec - start_time.tv_sec;
-        // microseconds = end_time.tv_usec - start_time.tv_usec;
-        // elapsed = seconds + 1e-6 * microseconds;
-        // printf("matmul float takes %f seconds to finish the computation.\n\n", elapsed);
-    }
-}
-
-void matrixMulUnrolled(Matrix A, Matrix B, Matrix Buffer)
-{
-    // struct timeval start_time, end_time;
-    // float seconds, microseconds, elapsed;
-    if (IS_DOUBLE)
-    {
-        // gettimeofday(&start_time, 0);
-        double ai00, ai01, ai02, ai03, ai10, ai11, ai12, ai13, ai20, ai21, ai22, ai23, ai30, ai31, ai32, ai33;
-        double bj00, bj01, bj02, bj03, bj10, bj11, bj12, bj13, bj20, bj21, bj22, bj23, bj30, bj31, bj32, bj33;
-
-        double **buffer_data = ((double **)Buffer.data);
-        double **A_data = (double **)A.data;
-        double **B_data = (double **)B.data;
-
-        int i, j, k;
-        int NRA0 = A.rows / 4 * 4; // If it is indivisible by 4, this will be the last index to do unrolling
-        int NCA0 = A.columns / 4 * 4;
-        int NCB0 = B.columns / 4 * 4;
-
-        for (i = 0; i < NRA0; i += 4)
-        {
-            for (k = 0; k < NCA0; k += 4)
-            {
-                ai00 = A_data[i][k];
-                ai01 = A_data[i][k + 1];
-                ai02 = A_data[i][k + 2];
-                ai03 = A_data[i][k + 3];
-                ai10 = A_data[i + 1][k];
-                ai11 = A_data[i + 1][k + 1];
-                ai12 = A_data[i + 1][k + 2];
-                ai13 = A_data[i + 1][k + 3];
-                ai20 = A_data[i + 2][k];
-                ai21 = A_data[i + 2][k + 1];
-                ai22 = A_data[i + 2][k + 2];
-                ai23 = A_data[i + 2][k + 3];
-                ai30 = A_data[i + 3][k];
-                ai31 = A_data[i + 3][k + 1];
-                ai32 = A_data[i + 3][k + 2];
-                ai33 = A_data[i + 3][k + 3];
-
-                for (j = 0; j < NCB0; j += 4)
-                {
-                    bj00 = B_data[k][j];
-                    bj01 = B_data[k][j + 1];
-                    bj02 = B_data[k][j + 2];
-                    bj03 = B_data[k][j + 3];
-                    bj10 = B_data[k + 1][j];
-                    bj11 = B_data[k + 1][j + 1];
-                    bj12 = B_data[k + 1][j + 2];
-                    bj13 = B_data[k + 1][j + 3];
-                    bj20 = B_data[k + 2][j];
-                    bj21 = B_data[k + 2][j + 1];
-                    bj22 = B_data[k + 2][j + 2];
-                    bj23 = B_data[k + 2][j + 3];
-                    bj30 = B_data[k + 3][j];
-                    bj31 = B_data[k + 3][j + 1];
-                    bj32 = B_data[k + 3][j + 2];
-                    bj33 = B_data[k + 3][j + 3];
-
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                    buffer_data[i][j + 1] = buffer_data[i][j + 1] + ai00 * bj01 + ai01 * bj11 + ai02 * bj21 + ai03 * bj31;
-                    buffer_data[i][j + 2] = buffer_data[i][j + 2] + ai00 * bj02 + ai01 * bj12 + ai02 * bj22 + ai03 * bj32;
-                    buffer_data[i][j + 3] = buffer_data[i][j + 3] + ai00 * bj03 + ai01 * bj13 + ai02 * bj23 + ai03 * bj33;
-
-                    buffer_data[i + 1][j] = buffer_data[i + 1][j] + ai10 * bj00 + ai11 * bj10 + ai12 * bj20 + ai13 * bj30;
-                    buffer_data[i + 1][j + 1] = buffer_data[i + 1][j + 1] + ai10 * bj01 + ai11 * bj11 + ai12 * bj21 + ai13 * bj31;
-                    buffer_data[i + 1][j + 2] = buffer_data[i + 1][j + 2] + ai10 * bj02 + ai11 * bj12 + ai12 * bj22 + ai13 * bj32;
-                    buffer_data[i + 1][j + 3] = buffer_data[i + 1][j + 3] + ai10 * bj03 + ai11 * bj13 + ai12 * bj23 + ai13 * bj33;
-
-                    buffer_data[i + 2][j] = buffer_data[i + 2][j] + ai20 * bj00 + ai21 * bj10 + ai22 * bj20 + ai23 * bj30;
-                    buffer_data[i + 2][j + 1] = buffer_data[i + 2][j + 1] + ai20 * bj01 + ai21 * bj11 + ai22 * bj21 + ai23 * bj31;
-                    buffer_data[i + 2][j + 2] = buffer_data[i + 2][j + 2] + ai20 * bj02 + ai21 * bj12 + ai22 * bj22 + ai23 * bj32;
-                    buffer_data[i + 2][j + 3] = buffer_data[i + 2][j + 3] + ai20 * bj03 + ai21 * bj13 + ai22 * bj23 + ai23 * bj33;
-
-                    buffer_data[i + 3][j] = buffer_data[i + 3][j] + ai30 * bj00 + ai31 * bj10 + ai32 * bj20 + ai33 * bj30;
-                    buffer_data[i + 3][j + 1] = buffer_data[i + 3][j + 1] + ai30 * bj01 + ai31 * bj11 + ai32 * bj21 + ai33 * bj31;
-                    buffer_data[i + 3][j + 2] = buffer_data[i + 3][j + 2] + ai30 * bj02 + ai31 * bj12 + ai32 * bj22 + ai33 * bj32;
-                    buffer_data[i + 3][j + 3] = buffer_data[i + 3][j + 3] + ai30 * bj03 + ai31 * bj13 + ai32 * bj23 + ai33 * bj33;
-                }
-
-                // For elelments in remaining j columns
-                for (j = NCB0; j < B.columns; j++)
-                {
-                    bj00 = B_data[k][j];
-                    bj10 = B_data[k + 1][j];
-                    bj20 = B_data[k + 2][j];
-                    bj30 = B_data[k + 3][j];
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                    buffer_data[i + 1][j] = buffer_data[i + 1][j] + ai10 * bj00 + ai11 * bj10 + ai12 * bj20 + ai13 * bj30;
-                    buffer_data[i + 2][j] = buffer_data[i + 2][j] + ai20 * bj00 + ai21 * bj10 + ai22 * bj20 + ai23 * bj30;
-                    buffer_data[i + 3][j] = buffer_data[i + 3][j] + ai30 * bj00 + ai31 * bj10 + ai32 * bj20 + ai33 * bj30;
-                }
-            }
-
-            // for the remaining k
-            for (k = NCA0; k < A.columns; k++)
-            {
-                ai00 = A_data[i][k];
-                ai10 = A_data[i + 1][k];
-                ai20 = A_data[i + 2][k];
-                ai30 = A_data[i + 3][k];
-
-                for (j = 0; j < NCB0; j += 4)
-                {
-                    bj00 = B_data[k][j];
-                    bj01 = B_data[k][j + 1];
-                    bj02 = B_data[k][j + 2];
-                    bj03 = B_data[k][j + 3];
-
-                    buffer_data[i][j] += ai00 * bj00;
-                    buffer_data[i][j + 1] += ai00 * bj01;
-                    buffer_data[i][j + 2] += ai00 * bj02;
-                    buffer_data[i][j + 3] += ai00 * bj03;
-
-                    buffer_data[i + 1][j] += ai10 * bj00;
-                    buffer_data[i + 1][j + 1] += ai10 * bj01;
-                    buffer_data[i + 1][j + 2] += ai10 * bj02;
-                    buffer_data[i + 1][j + 3] += ai10 * bj03;
-
-                    buffer_data[i + 2][j] += ai20 * bj00;
-                    buffer_data[i + 2][j + 1] += ai20 * bj01;
-                    buffer_data[i + 2][j + 2] += ai20 * bj02;
-                    buffer_data[i + 2][j + 3] += ai20 * bj03;
-
-                    buffer_data[i + 3][j] += ai30 * bj00;
-                    buffer_data[i + 3][j + 1] += ai30 * bj01;
-                    buffer_data[i + 3][j + 2] += ai30 * bj02;
-                    buffer_data[i + 3][j + 3] += ai30 * bj03;
-                }
-
-                // For elelments in remaining j columns
-                for (j = NCB0; j < B.columns; j++)
-                {
-                    bj00 = B_data[k][j];
-                    buffer_data[i][j] += ai00 * bj00;
-                    buffer_data[i + 1][j] += ai10 * bj00;
-                    buffer_data[i + 2][j] += ai20 * bj00;
-                    buffer_data[i + 3][j] += ai30 * bj00;
-                }
-            }
-        }
-
-        // For elements in remaining i rows
-        for (i = NRA0; i < A.rows; i++)
-        {
-            for (k = 0; k < NCA0; k += 4)
-            {
-                ai00 = A_data[i][k];
-                ai01 = A_data[i][k + 1];
-                ai02 = A_data[i][k + 2];
-                ai03 = A_data[i][k + 3];
-                for (j = 0; j < NCB0; j += 4)
-                {
-                    bj00 = B_data[k][j];
-                    bj01 = B_data[k][j + 1];
-                    bj02 = B_data[k][j + 2];
-                    bj03 = B_data[k][j + 3];
-                    bj10 = B_data[k + 1][j];
-                    bj11 = B_data[k + 1][j + 1];
-                    bj12 = B_data[k + 1][j + 2];
-                    bj13 = B_data[k + 1][j + 3];
-                    bj20 = B_data[k + 2][j];
-                    bj21 = B_data[k + 2][j + 1];
-                    bj22 = B_data[k + 2][j + 2];
-                    bj23 = B_data[k + 2][j + 3];
-                    bj30 = B_data[k + 3][j];
-                    bj31 = B_data[k + 3][j + 1];
-                    bj32 = B_data[k + 3][j + 2];
-                    bj33 = B_data[k + 3][j + 3];
-
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                    buffer_data[i][j + 1] = buffer_data[i][j + 1] + ai00 * bj01 + ai01 * bj11 + ai02 * bj21 + ai03 * bj31;
-                    buffer_data[i][j + 2] = buffer_data[i][j + 2] + ai00 * bj02 + ai01 * bj12 + ai02 * bj22 + ai03 * bj32;
-                    buffer_data[i][j + 3] = buffer_data[i][j + 3] + ai00 * bj03 + ai01 * bj13 + ai02 * bj23 + ai03 * bj33;
-                }
-
-                // For elelments in remaining j columns
-                for (j = NCB0; j < B.columns; j++)
-                {
-                    bj00 = B_data[k][j];
-                    bj10 = B_data[k + 1][j];
-                    bj20 = B_data[k + 2][j];
-                    bj30 = B_data[k + 3][j];
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                }
-            }
-
-            // for the remaining k
-            for (k = NCA0; k < A.columns; k++)
-            {
-                ai00 = A_data[i][k];
-                for (j = 0; j < B.columns; j++)
-                    buffer_data[i][j] += ai00 * B_data[k][j];
-            }
-        }
-        // gettimeofday(&end_time, 0);
-        // seconds = end_time.tv_sec - start_time.tv_sec;
-        // microseconds = end_time.tv_usec - start_time.tv_usec;
-        // elapsed = seconds + 1e-6 * microseconds;
-        // printf("matmul with unrolled by the factor of 4 double takes %f seconds to finish the computation.\n\n", elapsed);
-    }
-    else
-    {
-        // gettimeofday(&start_time, 0);
-        float ai00, ai01, ai02, ai03, ai10, ai11, ai12, ai13, ai20, ai21, ai22, ai23, ai30, ai31, ai32, ai33;
-        float bj00, bj01, bj02, bj03, bj10, bj11, bj12, bj13, bj20, bj21, bj22, bj23, bj30, bj31, bj32, bj33;
-
-        float **buffer_data = ((float **)Buffer.data);
-        float **A_data = (float **)A.data;
-        float **B_data = (float **)B.data;
-
-        int i, j, k;
-        int NRA0 = A.rows / 4 * 4;
-        int NCA0 = A.columns / 4 * 4;
-        int NCB0 = B.columns / 4 * 4;
-
-        for (i = 0; i < NRA0; i += 4)
-        {
-            for (k = 0; k < NCA0; k += 4)
-            {
-                ai00 = A_data[i][k];
-                ai01 = A_data[i][k + 1];
-                ai02 = A_data[i][k + 2];
-                ai03 = A_data[i][k + 3];
-                ai10 = A_data[i + 1][k];
-                ai11 = A_data[i + 1][k + 1];
-                ai12 = A_data[i + 1][k + 2];
-                ai13 = A_data[i + 1][k + 3];
-                ai20 = A_data[i + 2][k];
-                ai21 = A_data[i + 2][k + 1];
-                ai22 = A_data[i + 2][k + 2];
-                ai23 = A_data[i + 2][k + 3];
-                ai30 = A_data[i + 3][k];
-                ai31 = A_data[i + 3][k + 1];
-                ai32 = A_data[i + 3][k + 2];
-                ai33 = A_data[i + 3][k + 3];
-
-                for (j = 0; j < NCB0; j += 4)
-                {
-                    bj00 = B_data[k][j];
-                    bj01 = B_data[k][j + 1];
-                    bj02 = B_data[k][j + 2];
-                    bj03 = B_data[k][j + 3];
-                    bj10 = B_data[k + 1][j];
-                    bj11 = B_data[k + 1][j + 1];
-                    bj12 = B_data[k + 1][j + 2];
-                    bj13 = B_data[k + 1][j + 3];
-                    bj20 = B_data[k + 2][j];
-                    bj21 = B_data[k + 2][j + 1];
-                    bj22 = B_data[k + 2][j + 2];
-                    bj23 = B_data[k + 2][j + 3];
-                    bj30 = B_data[k + 3][j];
-                    bj31 = B_data[k + 3][j + 1];
-                    bj32 = B_data[k + 3][j + 2];
-                    bj33 = B_data[k + 3][j + 3];
-
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                    buffer_data[i][j + 1] = buffer_data[i][j + 1] + ai00 * bj01 + ai01 * bj11 + ai02 * bj21 + ai03 * bj31;
-                    buffer_data[i][j + 2] = buffer_data[i][j + 2] + ai00 * bj02 + ai01 * bj12 + ai02 * bj22 + ai03 * bj32;
-                    buffer_data[i][j + 3] = buffer_data[i][j + 3] + ai00 * bj03 + ai01 * bj13 + ai02 * bj23 + ai03 * bj33;
-
-                    buffer_data[i + 1][j] = buffer_data[i + 1][j] + ai10 * bj00 + ai11 * bj10 + ai12 * bj20 + ai13 * bj30;
-                    buffer_data[i + 1][j + 1] = buffer_data[i + 1][j + 1] + ai10 * bj01 + ai11 * bj11 + ai12 * bj21 + ai13 * bj31;
-                    buffer_data[i + 1][j + 2] = buffer_data[i + 1][j + 2] + ai10 * bj02 + ai11 * bj12 + ai12 * bj22 + ai13 * bj32;
-                    buffer_data[i + 1][j + 3] = buffer_data[i + 1][j + 3] + ai10 * bj03 + ai11 * bj13 + ai12 * bj23 + ai13 * bj33;
-
-                    buffer_data[i + 2][j] = buffer_data[i + 2][j] + ai20 * bj00 + ai21 * bj10 + ai22 * bj20 + ai23 * bj30;
-                    buffer_data[i + 2][j + 1] = buffer_data[i + 2][j + 1] + ai20 * bj01 + ai21 * bj11 + ai22 * bj21 + ai23 * bj31;
-                    buffer_data[i + 2][j + 2] = buffer_data[i + 2][j + 2] + ai20 * bj02 + ai21 * bj12 + ai22 * bj22 + ai23 * bj32;
-                    buffer_data[i + 2][j + 3] = buffer_data[i + 2][j + 3] + ai20 * bj03 + ai21 * bj13 + ai22 * bj23 + ai23 * bj33;
-
-                    buffer_data[i + 3][j] = buffer_data[i + 3][j] + ai30 * bj00 + ai31 * bj10 + ai32 * bj20 + ai33 * bj30;
-                    buffer_data[i + 3][j + 1] = buffer_data[i + 3][j + 1] + ai30 * bj01 + ai31 * bj11 + ai32 * bj21 + ai33 * bj31;
-                    buffer_data[i + 3][j + 2] = buffer_data[i + 3][j + 2] + ai30 * bj02 + ai31 * bj12 + ai32 * bj22 + ai33 * bj32;
-                    buffer_data[i + 3][j + 3] = buffer_data[i + 3][j + 3] + ai30 * bj03 + ai31 * bj13 + ai32 * bj23 + ai33 * bj33;
-                }
-
-                // For elelments in remaining j columns
-                for (j = NCB0; j < B.columns; j++)
-                {
-                    bj00 = B_data[k][j];
-                    bj10 = B_data[k + 1][j];
-                    bj20 = B_data[k + 2][j];
-                    bj30 = B_data[k + 3][j];
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                    buffer_data[i + 1][j] = buffer_data[i + 1][j] + ai10 * bj00 + ai11 * bj10 + ai12 * bj20 + ai13 * bj30;
-                    buffer_data[i + 2][j] = buffer_data[i + 2][j] + ai20 * bj00 + ai21 * bj10 + ai22 * bj20 + ai23 * bj30;
-                    buffer_data[i + 3][j] = buffer_data[i + 3][j] + ai30 * bj00 + ai31 * bj10 + ai32 * bj20 + ai33 * bj30;
-                }
-            }
-
-            // for the remaining k
-            for (k = NCA0; k < A.columns; k++)
-            {
-                ai00 = A_data[i][k];
-                ai10 = A_data[i + 1][k];
-                ai20 = A_data[i + 2][k];
-                ai30 = A_data[i + 3][k];
-
-                for (j = 0; j < NCB0; j += 4)
-                {
-                    bj00 = B_data[k][j];
-                    bj01 = B_data[k][j + 1];
-                    bj02 = B_data[k][j + 2];
-                    bj03 = B_data[k][j + 3];
-
-                    buffer_data[i][j] += ai00 * bj00;
-                    buffer_data[i][j + 1] += ai00 * bj01;
-                    buffer_data[i][j + 2] += ai00 * bj02;
-                    buffer_data[i][j + 3] += ai00 * bj03;
-
-                    buffer_data[i + 1][j] += ai10 * bj00;
-                    buffer_data[i + 1][j + 1] += ai10 * bj01;
-                    buffer_data[i + 1][j + 2] += ai10 * bj02;
-                    buffer_data[i + 1][j + 3] += ai10 * bj03;
-
-                    buffer_data[i + 2][j] += ai20 * bj00;
-                    buffer_data[i + 2][j + 1] += ai20 * bj01;
-                    buffer_data[i + 2][j + 2] += ai20 * bj02;
-                    buffer_data[i + 2][j + 3] += ai20 * bj03;
-
-                    buffer_data[i + 3][j] += ai30 * bj00;
-                    buffer_data[i + 3][j + 1] += ai30 * bj01;
-                    buffer_data[i + 3][j + 2] += ai30 * bj02;
-                    buffer_data[i + 3][j + 3] += ai30 * bj03;
-                }
-
-                // For elelments in remaining j columns
-                for (j = NCB0; j < B.columns; j++)
-                {
-                    bj00 = B_data[k][j];
-                    buffer_data[i][j] += ai00 * bj00;
-                    buffer_data[i + 1][j] += ai10 * bj00;
-                    buffer_data[i + 2][j] += ai20 * bj00;
-                    buffer_data[i + 3][j] += ai30 * bj00;
-                }
-            }
-        }
-
-        // For elements in remaining i rows
-        for (i = NRA0; i < A.rows; i++)
-        {
-            for (k = 0; k < NCA0; k += 4)
-            {
-                ai00 = A_data[i][k];
-                ai01 = A_data[i][k + 1];
-                ai02 = A_data[i][k + 2];
-                ai03 = A_data[i][k + 3];
-                for (j = 0; j < NCB0; j += 4)
-                {
-                    bj00 = B_data[k][j];
-                    bj01 = B_data[k][j + 1];
-                    bj02 = B_data[k][j + 2];
-                    bj03 = B_data[k][j + 3];
-                    bj10 = B_data[k + 1][j];
-                    bj11 = B_data[k + 1][j + 1];
-                    bj12 = B_data[k + 1][j + 2];
-                    bj13 = B_data[k + 1][j + 3];
-                    bj20 = B_data[k + 2][j];
-                    bj21 = B_data[k + 2][j + 1];
-                    bj22 = B_data[k + 2][j + 2];
-                    bj23 = B_data[k + 2][j + 3];
-                    bj30 = B_data[k + 3][j];
-                    bj31 = B_data[k + 3][j + 1];
-                    bj32 = B_data[k + 3][j + 2];
-                    bj33 = B_data[k + 3][j + 3];
-
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                    buffer_data[i][j + 1] = buffer_data[i][j + 1] + ai00 * bj01 + ai01 * bj11 + ai02 * bj21 + ai03 * bj31;
-                    buffer_data[i][j + 2] = buffer_data[i][j + 2] + ai00 * bj02 + ai01 * bj12 + ai02 * bj22 + ai03 * bj32;
-                    buffer_data[i][j + 3] = buffer_data[i][j + 3] + ai00 * bj03 + ai01 * bj13 + ai02 * bj23 + ai03 * bj33;
-                }
-
-                // For elelments in remaining j columns
-                for (j = NCB0; j < B.columns; j++)
-                {
-                    bj00 = B_data[k][j];
-                    bj10 = B_data[k + 1][j];
-                    bj20 = B_data[k + 2][j];
-                    bj30 = B_data[k + 3][j];
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                }
-            }
-
-            // for the remaining k
-            for (k = NCA0; k < A.columns; k++)
-            {
-                ai00 = A_data[i][k];
-                for (j = 0; j < B.columns; j++)
-                    buffer_data[i][j] += ai00 * B_data[k][j];
-            }
-        }
-        // gettimeofday(&end_time, 0);
-        // seconds = end_time.tv_sec - start_time.tv_sec;
-        // microseconds = end_time.tv_usec - start_time.tv_usec;
-        // elapsed = seconds + 1e-6 * microseconds;
-        // printf("matmul with unrolled by the factor of 4 float takes %f seconds to finish the computation.\n\n", elapsed);
-    }
-}
-
-void matrixMulSequencial(Matrix A, Matrix B, Matrix C, Matrix D)
-{
-    int cost1 = A.rows * A.columns * B.columns + A.columns * C.rows * C.columns; // cost of (A*B)*C
-    int cost2 = B.rows * B.columns * C.columns + A.rows * A.columns * C.columns; // cost of A*(B*C)
-    Matrix T;
-
-    struct timeval start_time, end_time;
     float seconds, microseconds, elapsed;
+    struct timeval start_time, end_time;
+
+    double **A_data = (double **)A.data;
+    double **B_data = (double **)B.data;
+    double **Result_data = (double **)Result.data;
+    register double a00, a01, a02, a03, a10, a11, a12, a13, a20, a21, a22, a23, a30, a31, a32, a33;
+    register double b00, b01, b02, b03, b10, b11, b12, b13, b20, b21, b22, b23, b30, b31, b32, b33;
+    register int i, j, k;
+    int row_A = A.rows, col_A = A.columns, col_B = B.columns;
+    int row_A0 = A.rows / 4 * 4;
+    int col_A0 = A.columns / 4 * 4;
+    int col_B0 = B.columns / 4 * 4;
 
     gettimeofday(&start_time, 0);
-
-    if (cost1 <= cost2)
+    for (i = 0; i < row_A0; i += UnrollingFactor)
     {
-        initializeMatrix(&T, A.rows, B.columns);
-        matrixMul(A, B, T);
-        matrixMul(T, C, D);
-    }
-    else
-    {
-        initializeMatrix(&T, B.rows, C.columns);
-        matrixMul(B, C, T);
-        matrixMul(A, T, D);
-    }
+        for (j = 0; j < col_A0; j += UnrollingFactor)
+        {
+            a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+            a10 = A_data[i + 1][j], a11 = A_data[i + 1][j + 1], a12 = A_data[i + 1][j + 2], a13 = A_data[i + 1][j + 3];
+            a20 = A_data[i + 2][j], a21 = A_data[i + 2][j + 1], a22 = A_data[i + 2][j + 2], a23 = A_data[i + 2][j + 3];
+            a30 = A_data[i + 3][j], a31 = A_data[i + 3][j + 1], a32 = A_data[i + 3][j + 2], a33 = A_data[i + 3][j + 3];
 
+            for (k = 0; k < col_B0; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i][k + 1] += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
+                Result_data[i][k + 2] += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
+                Result_data[i][k + 3] += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+
+                Result_data[i + 1][k] += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+                Result_data[i + 1][k + 1] += a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31;
+                Result_data[i + 1][k + 2] += a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32;
+                Result_data[i + 1][k + 3] += a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
+
+                Result_data[i + 2][k] += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+                Result_data[i + 2][k + 1] += a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31;
+                Result_data[i + 2][k + 2] += a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32;
+                Result_data[i + 2][k + 3] += a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
+
+                Result_data[i + 3][k] += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+                Result_data[i + 3][k + 1] += a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31;
+                Result_data[i + 3][k + 2] += a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32;
+                Result_data[i + 3][k + 3] += a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
+            }
+            // If column B is indivisible by unrolling factor. This do the rest.
+            for (k = col_B0; k < col_B; k++)
+            {
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i + 1][k] += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+                Result_data[i + 2][k] += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+                Result_data[i + 3][k] += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+            }
+        }
+        // If column A is indivisible by unrolling factor. This do the rest, while keep k unrolling.
+        for (j = col_A0; j < col_A; j++)
+        {
+            a00 = A_data[i][j];
+            a10 = A_data[i + 1][j];
+            a20 = A_data[i + 2][j];
+            a30 = A_data[i + 3][j];
+            for (k = 0; k < col_B0; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+
+                Result_data[i][k] += a00 * b00;
+                Result_data[i][k + 1] += a00 * b01;
+                Result_data[i][k + 2] += a00 * b02;
+                Result_data[i][k + 3] += a00 * b03;
+
+                Result_data[i + 1][k] += a10 * b00;
+                Result_data[i + 1][k + 1] += a10 * b01;
+                Result_data[i + 1][k + 2] += a10 * b02;
+                Result_data[i + 1][k + 3] += a10 * b03;
+
+                Result_data[i + 2][k] += a20 * b00;
+                Result_data[i + 2][k + 1] += a20 * b01;
+                Result_data[i + 2][k + 2] += a20 * b02;
+                Result_data[i + 2][k + 3] += a20 * b03;
+
+                Result_data[i + 3][k] += a30 * b00;
+                Result_data[i + 3][k + 1] += a30 * b01;
+                Result_data[i + 3][k + 2] += a30 * b02;
+                Result_data[i + 3][k + 3] += a30 * b03;
+            }
+            for (k = col_B0; k < col_B; k++)
+            {
+                b00 = B_data[j][k];
+                Result_data[i][k] += a00 * b00;
+                Result_data[i + 1][k] += a10 * b00;
+                Result_data[i + 2][k] += a20 * b00;
+                Result_data[i + 3][k] += a30 * b00;
+            }
+        }
+    }
+    // If row A is indivisible by unrolling factor. This do the rest, while keep j, k unrolling.
+    for (i = row_A0; i < row_A; i++)
+    {
+        for (j = 0; j < col_A0; j += UnrollingFactor)
+        {
+            a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+            for (k = 0; k < col_B0; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i][k + 1] += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
+                Result_data[i][k + 2] += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
+                Result_data[i][k + 3] += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+            }
+            for (k = col_B0; k < col_B; k++)
+            {
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+            }
+        }
+        for (j = col_A0; j < col_A; j++)
+        {
+            a00 = A_data[i][j];
+            for (k = 0; k < col_B0; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                Result_data[i][k] += a00 * b00;
+                Result_data[i][k + 1] += a00 * b01;
+                Result_data[i][k + 2] += a00 * b02;
+                Result_data[i][k + 3] += a00 * b03;
+            }
+            for (k = col_B0; k < col_B; k++)
+            {
+                b00 = B_data[j][k];
+                Result_data[i][k] += a00 * b00;
+            }
+        }
+    }
     gettimeofday(&end_time, 0);
+    // timer end here
     seconds = end_time.tv_sec - start_time.tv_sec;
     microseconds = end_time.tv_usec - start_time.tv_usec;
     elapsed = seconds + 1e-6 * microseconds;
-    printf("matmul sequencial takes %f seconds to finish the computation.\n\n", elapsed);
-
-    freeMatrix(&T);
+    return elapsed;
 }
-void matrixMulUnrolledSequencial(Matrix A, Matrix B, Matrix C, Matrix D)
-{
-    int cost1 = A.rows * A.columns * B.columns + A.columns * C.rows * C.columns; // cost of (A*B)*C
-    int cost2 = B.rows * B.columns * C.columns + A.rows * A.columns * C.columns; // cost of A*(B*C)
-    Matrix T;
 
-    struct timeval start_time, end_time;
+float matrixMulLoopUnrollingDoubleIKJ(matrix A, matrix B, matrix Result)
+{
+    // This function is not being used.
     float seconds, microseconds, elapsed;
+    struct timeval start_time, end_time;
+
+    double **A_data = (double **)A.data;
+    double **B_data = (double **)B.data;
+    double **Result_data = (double **)Result.data;
+    double a00, a01, a02, a03, a10, a11, a12, a13, a20, a21, a22, a23, a30, a31, a32, a33;
+    double b00, b01, b02, b03, b10, b11, b12, b13, b20, b21, b22, b23, b30, b31, b32, b33;
+    double c00, c01, c02, c03, c10, c11, c12, c13, c20, c21, c22, c23, c30, c31, c32, c33;
+    int row_A = A.rows, col_A = A.columns, col_B = B.columns, i, j, k;
+    int row_A0 = A.rows / 4 * 4;
+    int col_A0 = A.columns / 4 * 4;
+    int col_B0 = B.columns / 4 * 4;
 
     gettimeofday(&start_time, 0);
 
-    if (cost1 <= cost2)
+    for (i = 0; i < row_A0; i += UnrollingFactor)
     {
-        initializeMatrix(&T, A.rows, B.columns);
-        matrixMulUnrolled(A, B, T);
-        matrixMulUnrolled(T, C, D);
-    }
-    else
-    {
-        initializeMatrix(&T, B.rows, C.columns);
-        matrixMulUnrolled(B, C, T);
-        matrixMulUnrolled(A, T, D);
-    }
+        for (k = 0; k < col_B0; k += UnrollingFactor)
+        {
+            c00 = 0.0, c01 = 0.0, c02 = 0.0, c03 = 0.0;
+            c10 = 0.0, c11 = 0.0, c12 = 0.0, c13 = 0.0;
+            c20 = 0.0, c21 = 0.0, c22 = 0.0, c23 = 0.0;
+            c30 = 0.0, c31 = 0.0, c32 = 0.0, c33 = 0.0;
+            for (j = 0; j < col_A0; j += UnrollingFactor)
+            {
+                a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+                a10 = A_data[i + 1][j], a11 = A_data[i + 1][j + 1], a12 = A_data[i + 1][j + 2], a13 = A_data[i + 1][j + 3];
+                a20 = A_data[i + 2][j], a21 = A_data[i + 2][j + 1], a22 = A_data[i + 2][j + 2], a23 = A_data[i + 2][j + 3];
+                a30 = A_data[i + 3][j], a31 = A_data[i + 3][j + 1], a32 = A_data[i + 3][j + 2], a33 = A_data[i + 3][j + 3];
 
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                c00 += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30, c01 += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31, c02 += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32, c03 += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+                c10 += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30, c11 += a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31, c12 += a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32, c13 += a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
+                c20 += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30, c21 += a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31, c22 += a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32, c23 += a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
+                c30 += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30, c31 += a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31, c32 += a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32, c33 += a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
+            }
+            // Handle the rest of j
+            for (j = col_A0; j < A.columns; j++)
+            {
+                a00 = A_data[i][j];
+                a10 = A_data[i + 1][j];
+                a20 = A_data[i + 2][j];
+                a30 = A_data[i + 3][j];
+
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+
+                c00 += a00 * b00, c01 += a00 * b01, c02 += a00 * b02, c03 += a00 * b03;
+                c10 += a10 * b00, c11 += a10 * b01, c12 += a10 * b02, c13 += a10 * b03;
+                c20 += a20 * b00, c21 += a20 * b01, c22 += a20 * b02, c23 += a20 * b03;
+                c30 += a30 * b00, c31 += a30 * b01, c32 += a30 * b02, c33 += a30 * b03;
+            }
+
+            Result_data[i][k] = c00, Result_data[i][k + 1] = c01, Result_data[i][k + 2] = c02, Result_data[i][k + 3] = c03;
+            Result_data[i + 1][k] = c10, Result_data[i + 1][k + 1] = c11, Result_data[i + 1][k + 2] = c12, Result_data[i + 1][k + 3] = c13;
+            Result_data[i + 2][k] = c20, Result_data[i + 2][k + 1] = c21, Result_data[i + 2][k + 2] = c22, Result_data[i + 2][k + 3] = c23;
+            Result_data[i + 3][k] = c30, Result_data[i + 3][k + 1] = c31, Result_data[i + 3][k + 2] = c32, Result_data[i + 3][k + 3] = c33;
+        }
+    }
     gettimeofday(&end_time, 0);
+    // timer end here
     seconds = end_time.tv_sec - start_time.tv_sec;
     microseconds = end_time.tv_usec - start_time.tv_usec;
     elapsed = seconds + 1e-6 * microseconds;
-    printf("matmul unrolled takes %f seconds to finish the computation.\n\n", elapsed);
-
-    freeMatrix(&T);
+    return elapsed;
 }
 
-void compareMatrix(Matrix A, Matrix B)
+float matrixMulLoopUnrollingFloat(matrix A, matrix B, matrix Result)
+{
+    float seconds, microseconds, elapsed;
+    struct timeval start_time, end_time;
+
+    float **A_data = (float **)A.data;
+    float **B_data = (float **)B.data;
+    float **Result_data = (float **)Result.data;
+    register float a00, a01, a02, a03, a10, a11, a12, a13, a20, a21, a22, a23, a30, a31, a32, a33;
+    register float b00, b01, b02, b03, b10, b11, b12, b13, b20, b21, b22, b23, b30, b31, b32, b33;
+    register int i, j, k;
+    int row_A = A.rows, col_A = A.columns, col_B = B.columns;
+    int row_A0 = A.rows / 4 * 4;
+    int col_A0 = A.columns / 4 * 4;
+    int col_B0 = B.columns / 4 * 4;
+
+    gettimeofday(&start_time, 0);
+    for (i = 0; i < row_A0; i += UnrollingFactor)
+    {
+        for (j = 0; j < col_A0; j += UnrollingFactor)
+        {
+            a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+            a10 = A_data[i + 1][j], a11 = A_data[i + 1][j + 1], a12 = A_data[i + 1][j + 2], a13 = A_data[i + 1][j + 3];
+            a20 = A_data[i + 2][j], a21 = A_data[i + 2][j + 1], a22 = A_data[i + 2][j + 2], a23 = A_data[i + 2][j + 3];
+            a30 = A_data[i + 3][j], a31 = A_data[i + 3][j + 1], a32 = A_data[i + 3][j + 2], a33 = A_data[i + 3][j + 3];
+
+            for (k = 0; k < col_B0; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i][k + 1] += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
+                Result_data[i][k + 2] += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
+                Result_data[i][k + 3] += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+
+                Result_data[i + 1][k] += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+                Result_data[i + 1][k + 1] += a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31;
+                Result_data[i + 1][k + 2] += a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32;
+                Result_data[i + 1][k + 3] += a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
+
+                Result_data[i + 2][k] += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+                Result_data[i + 2][k + 1] += a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31;
+                Result_data[i + 2][k + 2] += a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32;
+                Result_data[i + 2][k + 3] += a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
+
+                Result_data[i + 3][k] += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+                Result_data[i + 3][k + 1] += a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31;
+                Result_data[i + 3][k + 2] += a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32;
+                Result_data[i + 3][k + 3] += a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
+            }
+            // If column B is indivisible by unrolling factor. This do the rest.
+            for (k = col_B0; k < col_B; k++)
+            {
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i + 1][k] += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+                Result_data[i + 2][k] += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+                Result_data[i + 3][k] += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+            }
+        }
+        // If column A is indivisible by unrolling factor. This do the rest, while keep k unrolling.
+        for (j = col_A0; j < col_A; j++)
+        {
+            a00 = A_data[i][j];
+            a10 = A_data[i + 1][j];
+            a20 = A_data[i + 2][j];
+            a30 = A_data[i + 3][j];
+            for (k = 0; k < col_B0; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+
+                Result_data[i][k] += a00 * b00;
+                Result_data[i][k + 1] += a00 * b01;
+                Result_data[i][k + 2] += a00 * b02;
+                Result_data[i][k + 3] += a00 * b03;
+
+                Result_data[i + 1][k] += a10 * b00;
+                Result_data[i + 1][k + 1] += a10 * b01;
+                Result_data[i + 1][k + 2] += a10 * b02;
+                Result_data[i + 1][k + 3] += a10 * b03;
+
+                Result_data[i + 2][k] += a20 * b00;
+                Result_data[i + 2][k + 1] += a20 * b01;
+                Result_data[i + 2][k + 2] += a20 * b02;
+                Result_data[i + 2][k + 3] += a20 * b03;
+
+                Result_data[i + 3][k] += a30 * b00;
+                Result_data[i + 3][k + 1] += a30 * b01;
+                Result_data[i + 3][k + 2] += a30 * b02;
+                Result_data[i + 3][k + 3] += a30 * b03;
+            }
+            for (k = col_B0; k < col_B; k++)
+            {
+                b00 = B_data[j][k];
+                Result_data[i][k] += a00 * b00;
+                Result_data[i + 1][k] += a10 * b00;
+                Result_data[i + 2][k] += a20 * b00;
+                Result_data[i + 3][k] += a30 * b00;
+            }
+        }
+    }
+    // If row A is indivisible by unrolling factor. This do the rest, while keep j, k unrolling.
+    for (i = row_A0; i < row_A; i++)
+    {
+        for (j = 0; j < col_A0; j += UnrollingFactor)
+        {
+            a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+            for (k = 0; k < col_B0; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i][k + 1] += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
+                Result_data[i][k + 2] += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
+                Result_data[i][k + 3] += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+            }
+            for (k = col_B0; k < col_B; k++)
+            {
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+            }
+        }
+        for (j = col_A0; j < col_A; j++)
+        {
+            a00 = A_data[i][j];
+            for (k = 0; k < col_B0; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                Result_data[i][k] += a00 * b00;
+                Result_data[i][k + 1] += a00 * b01;
+                Result_data[i][k + 2] += a00 * b02;
+                Result_data[i][k + 3] += a00 * b03;
+            }
+            for (k = col_B0; k < col_B; k++)
+            {
+                b00 = B_data[j][k];
+                Result_data[i][k] += a00 * b00;
+            }
+        }
+    }
+    gettimeofday(&end_time, 0);
+    // timer end here
+    seconds = end_time.tv_sec - start_time.tv_sec;
+    microseconds = end_time.tv_usec - start_time.tv_usec;
+    elapsed = seconds + 1e-6 * microseconds;
+    return elapsed;
+}
+
+void *_matrixMulLoopUnrollingParallelDouble(void *arg)
+{
+    t_arg *args = (t_arg *)arg;
+
+    double **A_data = (double **)args->A.data;
+    double **B_data = (double **)args->B.data;
+    double **Result_data = (double **)args->Result.data;
+    register double a00, a01, a02, a03, a10, a11, a12, a13, a20, a21, a22, a23, a30, a31, a32, a33;
+    register double b00, b01, b02, b03, b10, b11, b12, b13, b20, b21, b22, b23, b30, b31, b32, b33;
+
+    register int i, j, k;
+    int start_row = args->start_row;
+    int start_col = args->start_col;
+    int end_row = args->end_row;
+    int end_col = args->end_col;
+    int last_row_A_to_unroll = (end_row - start_row) / UnrollingFactor * UnrollingFactor + start_row;
+    int last_col_A_to_unroll = args->A.columns / UnrollingFactor * UnrollingFactor;
+    int last_col_B_to_unroll = (end_col - start_col) / UnrollingFactor * UnrollingFactor + start_col;
+
+    for (i = start_row; i < last_row_A_to_unroll; i += UnrollingFactor)
+    {
+        for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+        {
+            a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+            a10 = A_data[i + 1][j], a11 = A_data[i + 1][j + 1], a12 = A_data[i + 1][j + 2], a13 = A_data[i + 1][j + 3];
+            a20 = A_data[i + 2][j], a21 = A_data[i + 2][j + 1], a22 = A_data[i + 2][j + 2], a23 = A_data[i + 2][j + 3];
+            a30 = A_data[i + 3][j], a31 = A_data[i + 3][j + 1], a32 = A_data[i + 3][j + 2], a33 = A_data[i + 3][j + 3];
+
+            for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i][k + 1] += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
+                Result_data[i][k + 2] += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
+                Result_data[i][k + 3] += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+
+                Result_data[i + 1][k] += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+                Result_data[i + 1][k + 1] += a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31;
+                Result_data[i + 1][k + 2] += a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32;
+                Result_data[i + 1][k + 3] += a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
+
+                Result_data[i + 2][k] += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+                Result_data[i + 2][k + 1] += a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31;
+                Result_data[i + 2][k + 2] += a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32;
+                Result_data[i + 2][k + 3] += a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
+
+                Result_data[i + 3][k] += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+                Result_data[i + 3][k + 1] += a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31;
+                Result_data[i + 3][k + 2] += a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32;
+                Result_data[i + 3][k + 3] += a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
+            }
+            // If column B is indivisible by unrolling factor. This do the rest.
+            for (k = last_col_B_to_unroll; k < end_col; k++)
+            {
+
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i + 1][k] += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+                Result_data[i + 2][k] += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+                Result_data[i + 3][k] += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+            }
+        }
+        // If column A is indivisible by unrolling factor. This do the rest, while keep k unrolling.
+
+        for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+        {
+            a00 = A_data[i][j];
+            a10 = A_data[i + 1][j];
+            a20 = A_data[i + 2][j];
+            a30 = A_data[i + 3][j];
+            for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+
+                Result_data[i][k] += a00 * b00;
+                Result_data[i][k + 1] += a00 * b01;
+                Result_data[i][k + 2] += a00 * b02;
+                Result_data[i][k + 3] += a00 * b03;
+
+                Result_data[i + 1][k] += a10 * b00;
+                Result_data[i + 1][k + 1] += a10 * b01;
+                Result_data[i + 1][k + 2] += a10 * b02;
+                Result_data[i + 1][k + 3] += a10 * b03;
+
+                Result_data[i + 2][k] += a20 * b00;
+                Result_data[i + 2][k + 1] += a20 * b01;
+                Result_data[i + 2][k + 2] += a20 * b02;
+                Result_data[i + 2][k + 3] += a20 * b03;
+
+                Result_data[i + 3][k] += a30 * b00;
+                Result_data[i + 3][k + 1] += a30 * b01;
+                Result_data[i + 3][k + 2] += a30 * b02;
+                Result_data[i + 3][k + 3] += a30 * b03;
+            }
+            for (k = last_col_B_to_unroll; k < end_col; k++)
+            {
+                b00 = B_data[j][k];
+                Result_data[i][k] += a00 * b00;
+                Result_data[i + 1][k] += a10 * b00;
+                Result_data[i + 2][k] += a20 * b00;
+                Result_data[i + 3][k] += a30 * b00;
+            }
+        }
+    }
+
+    for (i = last_row_A_to_unroll; i < end_row; i++)
+    {
+
+        for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+        {
+            a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+            for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i][k + 1] += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
+                Result_data[i][k + 2] += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
+                Result_data[i][k + 3] += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+            }
+            for (k = last_col_B_to_unroll; k < end_col; k++)
+            {
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+            }
+        }
+        for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+        {
+            a00 = A_data[i][j];
+            for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                Result_data[i][k] += a00 * b00;
+                Result_data[i][k + 1] += a00 * b01;
+                Result_data[i][k + 2] += a00 * b02;
+                Result_data[i][k + 3] += a00 * b03;
+            }
+            for (k = last_col_B_to_unroll; k < end_col; k++)
+            {
+                b00 = B_data[j][k];
+                Result_data[i][k] += a00 * b00;
+            }
+        }
+    }
+    return NULL;
+}
+
+void *_matrixMulLoopUnrollingParallelDoubleIKJV1(void *arg)
+{
+    // This function is not being used.
+    t_arg *args = (t_arg *)arg;
+
+    double **A_data = (double **)args->A.data;
+    double **B_data = (double **)args->B.data;
+    double **Result_data = (double **)args->Result.data;
+    register double a00, a01, a02, a03, a10, a11, a12, a13, a20, a21, a22, a23, a30, a31, a32, a33;
+    register double b00, b01, b02, b03, b10, b11, b12, b13, b20, b21, b22, b23, b30, b31, b32, b33;
+
+    register int i, j, k;
+    int start_row = args->start_row;
+    int start_col = args->start_col;
+    int end_row = args->end_row;
+    int end_col = args->end_col;
+    int last_row_A_to_unroll = (end_row - start_row) / UnrollingFactor * UnrollingFactor + start_row;
+    int last_col_A_to_unroll = args->A.columns / UnrollingFactor * UnrollingFactor;
+    int last_col_B_to_unroll = (end_col - start_col) / UnrollingFactor * UnrollingFactor + start_col;
+
+    for (i = start_row; i < last_row_A_to_unroll; i += UnrollingFactor)
+    {
+        for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+        {
+            for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+            {
+                a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+                a10 = A_data[i + 1][j], a11 = A_data[i + 1][j + 1], a12 = A_data[i + 1][j + 2], a13 = A_data[i + 1][j + 3];
+                a20 = A_data[i + 2][j], a21 = A_data[i + 2][j + 1], a22 = A_data[i + 2][j + 2], a23 = A_data[i + 2][j + 3];
+                a30 = A_data[i + 3][j], a31 = A_data[i + 3][j + 1], a32 = A_data[i + 3][j + 2], a33 = A_data[i + 3][j + 3];
+
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i][k + 1] += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
+                Result_data[i][k + 2] += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
+                Result_data[i][k + 3] += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+
+                Result_data[i + 1][k] += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+                Result_data[i + 1][k + 1] += a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31;
+                Result_data[i + 1][k + 2] += a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32;
+                Result_data[i + 1][k + 3] += a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
+
+                Result_data[i + 2][k] += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+                Result_data[i + 2][k + 1] += a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31;
+                Result_data[i + 2][k + 2] += a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32;
+                Result_data[i + 2][k + 3] += a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
+
+                Result_data[i + 3][k] += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+                Result_data[i + 3][k + 1] += a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31;
+                Result_data[i + 3][k + 2] += a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32;
+                Result_data[i + 3][k + 3] += a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
+            }
+
+            // Handle the rest of j
+            for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+            {
+                a00 = A_data[i][j];
+                a10 = A_data[i + 1][j];
+                a20 = A_data[i + 2][j];
+                a30 = A_data[i + 3][j];
+
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+
+                Result_data[i][k] += a00 * b00, Result_data[i][k + 1] += a00 * b01, Result_data[i][k + 2] += a00 * b02, Result_data[i][k + 3] += a00 * b03;
+                Result_data[i + 1][k] += a10 * b00, Result_data[i + 2][k + 1] += a10 * b01, Result_data[i + 1][k + 2] += a10 * b02, Result_data[i + 1][k + 3] += a10 * b03;
+                Result_data[i + 2][k] += a20 * b00, Result_data[i + 2][k + 2] += a20 * b01, Result_data[i + 2][k + 2] += a20 * b02, Result_data[i + 2][k + 3] += a20 * b03;
+                Result_data[i + 3][k] += a30 * b00, Result_data[i + 2][k + 3] += a30 * b01, Result_data[i + 3][k + 2] += a30 * b02, Result_data[i + 3][k + 3] += a30 * b03;
+            }
+        }
+        // Handle the rest of k
+        for (k = last_col_B_to_unroll; k < end_col; k++)
+        {
+            for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+            {
+                a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+                a10 = A_data[i + 1][j], a11 = A_data[i + 1][j + 1], a12 = A_data[i + 1][j + 2], a13 = A_data[i + 1][j + 3];
+                a20 = A_data[i + 2][j], a21 = A_data[i + 2][j + 1], a22 = A_data[i + 2][j + 2], a23 = A_data[i + 2][j + 3];
+                a30 = A_data[i + 3][j], a31 = A_data[i + 3][j + 1], a32 = A_data[i + 3][j + 2], a33 = A_data[i + 3][j + 3];
+
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i + 1][k] += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+                Result_data[i + 2][k] += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+                Result_data[i + 3][k] += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+            }
+
+            for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+            {
+                a00 = A_data[i][j];
+                a10 = A_data[i + 1][j];
+                a20 = A_data[i + 2][j];
+                a30 = A_data[i + 3][j];
+                b00 = B_data[j][k];
+
+                Result_data[i][k] += a00 * b00;
+                Result_data[i + 1][k] += a10 * b00;
+                Result_data[i + 2][k] += a20 * b00;
+                Result_data[i + 3][k] += a30 * b00;
+            }
+            Result_data[i][k] = Result_data[i][k];
+            Result_data[i + 1][k] = Result_data[i + 1][k];
+            Result_data[i + 2][k] = Result_data[i + 2][k];
+            Result_data[i + 3][k] = Result_data[i + 3][k];
+        }
+    }
+    // Handle the rest of I
+    for (i = last_row_A_to_unroll; i < end_row; i++)
+    {
+        for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+        {
+            for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+            {
+                a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30, Result_data[i][k + 1] += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31, Result_data[i][k + 2] += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32, Result_data[i][k + 3] += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+            }
+
+            // Handle the rest of j
+            for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+            {
+                a00 = A_data[i][j];
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+
+                Result_data[i][k] += a00 * b00, Result_data[i][k + 1] += a00 * b01, Result_data[i][k + 2] += a00 * b02, Result_data[i][k + 3] += a00 * b03;
+            }
+        }
+        // Handle the rest of k
+        for (k = last_col_B_to_unroll; k < end_col; k++)
+        {
+            for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+            {
+                a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+            }
+
+            for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+            {
+                a00 = A_data[i][j];
+                b00 = B_data[j][k];
+
+                Result_data[i][k] += a00 * b00;
+            }
+            Result_data[i][k] = Result_data[i][k];
+        }
+    }
+
+    return NULL;
+}
+
+void *_matrixMulLoopUnrollingParallelDoubleIKJV2(void *arg)
+{
+    // This function is not being used.
+    t_arg *args = (t_arg *)arg;
+
+    double **restrict A_data = (double **)args->A.data;
+    double **restrict B_data = (double **)args->B.data;
+    double **restrict Result_data = (double **)args->Result.data;
+    double a00, a01, a02, a03, a10, a11, a12, a13, a20, a21, a22, a23, a30, a31, a32, a33;
+    double b00, b01, b02, b03, b10, b11, b12, b13, b20, b21, b22, b23, b30, b31, b32, b33;
+    register double c00, c01, c02, c03, c10, c11, c12, c13, c20, c21, c22, c23, c30, c31, c32, c33;
+
+    int i, j, k;
+    int start_row = args->start_row;
+    int start_col = args->start_col;
+    int end_row = args->end_row;
+    int end_col = args->end_col;
+    int last_row_A_to_unroll = (end_row - start_row) / UnrollingFactor * UnrollingFactor + start_row;
+    int last_col_A_to_unroll = args->A.columns / UnrollingFactor * UnrollingFactor;
+    int last_col_B_to_unroll = (end_col - start_col) / UnrollingFactor * UnrollingFactor + start_col;
+
+    for (i = start_row; i < last_row_A_to_unroll; i += UnrollingFactor)
+    {
+        for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+        {
+            c00 = 0.0, c01 = 0.0, c02 = 0.0, c03 = 0.0;
+            c10 = 0.0, c11 = 0.0, c12 = 0.0, c13 = 0.0;
+            c20 = 0.0, c21 = 0.0, c22 = 0.0, c23 = 0.0;
+            c30 = 0.0, c31 = 0.0, c32 = 0.0, c33 = 0.0;
+            for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+            {
+                a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+                a10 = A_data[i + 1][j], a11 = A_data[i + 1][j + 1], a12 = A_data[i + 1][j + 2], a13 = A_data[i + 1][j + 3];
+                a20 = A_data[i + 2][j], a21 = A_data[i + 2][j + 1], a22 = A_data[i + 2][j + 2], a23 = A_data[i + 2][j + 3];
+                a30 = A_data[i + 3][j], a31 = A_data[i + 3][j + 1], a32 = A_data[i + 3][j + 2], a33 = A_data[i + 3][j + 3];
+
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                c00 += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30, c01 += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31, c02 += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32, c03 += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+                c10 += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30, c11 += a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31, c12 += a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32, c13 += a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
+                c20 += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30, c21 += a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31, c22 += a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32, c23 += a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
+                c30 += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30, c31 += a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31, c32 += a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32, c33 += a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
+            }
+
+            // Handle the rest of j
+            for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+            {
+                a00 = A_data[i][j];
+                a10 = A_data[i + 1][j];
+                a20 = A_data[i + 2][j];
+                a30 = A_data[i + 3][j];
+
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+
+                c00 += a00 * b00, c01 += a00 * b01, c02 += a00 * b02, c03 += a00 * b03;
+                c10 += a10 * b00, c11 += a10 * b01, c12 += a10 * b02, c13 += a10 * b03;
+                c20 += a20 * b00, c21 += a20 * b01, c22 += a20 * b02, c23 += a20 * b03;
+                c30 += a30 * b00, c31 += a30 * b01, c32 += a30 * b02, c33 += a30 * b03;
+            }
+            Result_data[i][k] = c00, Result_data[i][k + 1] = c01, Result_data[i][k + 2] = c02, Result_data[i][k + 3] = c03;
+            Result_data[i + 1][k] = c10, Result_data[i + 1][k + 1] = c11, Result_data[i + 1][k + 2] = c12, Result_data[i + 1][k + 3] = c13;
+            Result_data[i + 2][k] = c20, Result_data[i + 2][k + 1] = c21, Result_data[i + 2][k + 2] = c22, Result_data[i + 2][k + 3] = c23;
+            Result_data[i + 3][k] = c30, Result_data[i + 3][k + 1] = c31, Result_data[i + 3][k + 2] = c32, Result_data[i + 3][k + 3] = c33;
+        }
+        // Handle the rest of k
+        for (k = last_col_B_to_unroll; k < end_col; k++)
+        {
+            c00 = 0.0;
+            c10 = 0.0;
+            c20 = 0.0;
+            c30 = 0.0;
+            for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+            {
+                a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+                a10 = A_data[i + 1][j], a11 = A_data[i + 1][j + 1], a12 = A_data[i + 1][j + 2], a13 = A_data[i + 1][j + 3];
+                a20 = A_data[i + 2][j], a21 = A_data[i + 2][j + 1], a22 = A_data[i + 2][j + 2], a23 = A_data[i + 2][j + 3];
+                a30 = A_data[i + 3][j], a31 = A_data[i + 3][j + 1], a32 = A_data[i + 3][j + 2], a33 = A_data[i + 3][j + 3];
+
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+
+                c00 += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                c10 += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+                c20 += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+                c30 += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+            }
+
+            for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+            {
+                a00 = A_data[i][j];
+                a10 = A_data[i + 1][j];
+                a20 = A_data[i + 2][j];
+                a30 = A_data[i + 3][j];
+                b00 = B_data[j][k];
+
+                c00 += a00 * b00;
+                c10 += a10 * b00;
+                c20 += a20 * b00;
+                c30 += a30 * b00;
+            }
+            Result_data[i][k] = c00;
+            Result_data[i + 1][k] = c10;
+            Result_data[i + 2][k] = c20;
+            Result_data[i + 3][k] = c30;
+        }
+    }
+    // Handle the rest of I
+    for (i = last_row_A_to_unroll; i < end_row; i++)
+    {
+        for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+        {
+            c00 = 0.0, c01 = 0.0, c02 = 0.0, c03 = 0.0;
+            for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+            {
+                a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                c00 += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30, c01 += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31, c02 += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32, c03 += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+            }
+
+            // Handle the rest of j
+            for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+            {
+                a00 = A_data[i][j];
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+
+                c00 += a00 * b00, c01 += a00 * b01, c02 += a00 * b02, c03 += a00 * b03;
+            }
+            Result_data[i][k] = c00, Result_data[i][k + 1] = c01, Result_data[i][k + 2] = c02, Result_data[i][k + 3] = c03;
+        }
+        // Handle the rest of k
+        for (k = last_col_B_to_unroll; k < end_col; k++)
+        {
+            c00 = 0.0;
+            for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+            {
+                a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+
+                c00 += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+            }
+
+            for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+            {
+                a00 = A_data[i][j];
+                b00 = B_data[j][k];
+
+                c00 += a00 * b00;
+            }
+            Result_data[i][k] = c00;
+        }
+    }
+
+    return NULL;
+}
+
+void *_matrixMulLoopUnrollingParallelFloatIKJV2(void *arg)
+{
+    // This function is not being used.
+    t_arg *args = (t_arg *)arg;
+
+    float **restrict A_data = (float **)args->A.data;
+    float **restrict B_data = (float **)args->B.data;
+    float **restrict Result_data = (float **)args->Result.data;
+    float a00, a01, a02, a03, a10, a11, a12, a13, a20, a21, a22, a23, a30, a31, a32, a33;
+    float b00, b01, b02, b03, b10, b11, b12, b13, b20, b21, b22, b23, b30, b31, b32, b33;
+    register float c00, c01, c02, c03, c10, c11, c12, c13, c20, c21, c22, c23, c30, c31, c32, c33;
+
+    int i, j, k;
+    int start_row = args->start_row;
+    int start_col = args->start_col;
+    int end_row = args->end_row;
+    int end_col = args->end_col;
+    int last_row_A_to_unroll = (end_row - start_row) / UnrollingFactor * UnrollingFactor + start_row;
+    int last_col_A_to_unroll = args->A.columns / UnrollingFactor * UnrollingFactor;
+    int last_col_B_to_unroll = (end_col - start_col) / UnrollingFactor * UnrollingFactor + start_col;
+
+    for (i = start_row; i < last_row_A_to_unroll; i += UnrollingFactor)
+    {
+        for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+        {
+            c00 = 0.0, c01 = 0.0, c02 = 0.0, c03 = 0.0;
+            c10 = 0.0, c11 = 0.0, c12 = 0.0, c13 = 0.0;
+            c20 = 0.0, c21 = 0.0, c22 = 0.0, c23 = 0.0;
+            c30 = 0.0, c31 = 0.0, c32 = 0.0, c33 = 0.0;
+            for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+            {
+                a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+                a10 = A_data[i + 1][j], a11 = A_data[i + 1][j + 1], a12 = A_data[i + 1][j + 2], a13 = A_data[i + 1][j + 3];
+                a20 = A_data[i + 2][j], a21 = A_data[i + 2][j + 1], a22 = A_data[i + 2][j + 2], a23 = A_data[i + 2][j + 3];
+                a30 = A_data[i + 3][j], a31 = A_data[i + 3][j + 1], a32 = A_data[i + 3][j + 2], a33 = A_data[i + 3][j + 3];
+
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                c00 += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30, c01 += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31, c02 += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32, c03 += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+                c10 += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30, c11 += a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31, c12 += a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32, c13 += a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
+                c20 += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30, c21 += a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31, c22 += a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32, c23 += a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
+                c30 += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30, c31 += a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31, c32 += a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32, c33 += a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
+            }
+
+            // Handle the rest of j
+            for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+            {
+                a00 = A_data[i][j];
+                a10 = A_data[i + 1][j];
+                a20 = A_data[i + 2][j];
+                a30 = A_data[i + 3][j];
+
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+
+                c00 += a00 * b00, c01 += a00 * b01, c02 += a00 * b02, c03 += a00 * b03;
+                c10 += a10 * b00, c11 += a10 * b01, c12 += a10 * b02, c13 += a10 * b03;
+                c20 += a20 * b00, c21 += a20 * b01, c22 += a20 * b02, c23 += a20 * b03;
+                c30 += a30 * b00, c31 += a30 * b01, c32 += a30 * b02, c33 += a30 * b03;
+            }
+            Result_data[i][k] = c00, Result_data[i][k + 1] = c01, Result_data[i][k + 2] = c02, Result_data[i][k + 3] = c03;
+            Result_data[i + 1][k] = c10, Result_data[i + 1][k + 1] = c11, Result_data[i + 1][k + 2] = c12, Result_data[i + 1][k + 3] = c13;
+            Result_data[i + 2][k] = c20, Result_data[i + 2][k + 1] = c21, Result_data[i + 2][k + 2] = c22, Result_data[i + 2][k + 3] = c23;
+            Result_data[i + 3][k] = c30, Result_data[i + 3][k + 1] = c31, Result_data[i + 3][k + 2] = c32, Result_data[i + 3][k + 3] = c33;
+        }
+        // Handle the rest of k
+        for (k = last_col_B_to_unroll; k < end_col; k++)
+        {
+            c00 = 0.0;
+            c10 = 0.0;
+            c20 = 0.0;
+            c30 = 0.0;
+            for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+            {
+                a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+                a10 = A_data[i + 1][j], a11 = A_data[i + 1][j + 1], a12 = A_data[i + 1][j + 2], a13 = A_data[i + 1][j + 3];
+                a20 = A_data[i + 2][j], a21 = A_data[i + 2][j + 1], a22 = A_data[i + 2][j + 2], a23 = A_data[i + 2][j + 3];
+                a30 = A_data[i + 3][j], a31 = A_data[i + 3][j + 1], a32 = A_data[i + 3][j + 2], a33 = A_data[i + 3][j + 3];
+
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+
+                c00 += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                c10 += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+                c20 += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+                c30 += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+            }
+
+            for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+            {
+                a00 = A_data[i][j];
+                a10 = A_data[i + 1][j];
+                a20 = A_data[i + 2][j];
+                a30 = A_data[i + 3][j];
+                b00 = B_data[j][k];
+
+                c00 += a00 * b00;
+                c10 += a10 * b00;
+                c20 += a20 * b00;
+                c30 += a30 * b00;
+            }
+            Result_data[i][k] = c00;
+            Result_data[i + 1][k] = c10;
+            Result_data[i + 2][k] = c20;
+            Result_data[i + 3][k] = c30;
+        }
+    }
+    // Handle the rest of I
+    for (i = last_row_A_to_unroll; i < end_row; i++)
+    {
+        for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+        {
+            c00 = 0.0, c01 = 0.0, c02 = 0.0, c03 = 0.0;
+            for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+            {
+                a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                c00 += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30, c01 += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31, c02 += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32, c03 += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+            }
+
+            // Handle the rest of j
+            for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+            {
+                a00 = A_data[i][j];
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+
+                c00 += a00 * b00, c01 += a00 * b01, c02 += a00 * b02, c03 += a00 * b03;
+            }
+            Result_data[i][k] = c00, Result_data[i][k + 1] = c01, Result_data[i][k + 2] = c02, Result_data[i][k + 3] = c03;
+        }
+        // Handle the rest of k
+        for (k = last_col_B_to_unroll; k < end_col; k++)
+        {
+            c00 = 0.0;
+            for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+            {
+                a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+
+                c00 += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+            }
+
+            for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+            {
+                a00 = A_data[i][j];
+                b00 = B_data[j][k];
+
+                c00 += a00 * b00;
+            }
+            Result_data[i][k] = c00;
+        }
+    }
+
+    return NULL;
+}
+
+void *_matrixMulLoopUnrollingParallelFloat(void *arg)
+{
+    t_arg *args = (t_arg *)arg;
+    float **A_data = (float **)args->A.data;
+    float **B_data = (float **)args->B.data;
+    float **Result_data = (float **)args->Result.data;
+    register float a00, a01, a02, a03, a10, a11, a12, a13, a20, a21, a22, a23, a30, a31, a32, a33;
+    register float b00, b01, b02, b03, b10, b11, b12, b13, b20, b21, b22, b23, b30, b31, b32, b33;
+
+    register int i, j, k;
+    int start_row = args->start_row;
+    int start_col = args->start_col;
+    int end_row = args->end_row;
+    int end_col = args->end_col;
+    int last_row_A_to_unroll = (end_row - start_row) / UnrollingFactor * UnrollingFactor + start_row;
+    int last_col_A_to_unroll = args->A.columns / UnrollingFactor * UnrollingFactor;
+    int last_col_B_to_unroll = (end_col - start_col) / UnrollingFactor * UnrollingFactor + start_col;
+
+    for (i = start_row; i < last_row_A_to_unroll; i += UnrollingFactor)
+    {
+        for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+        {
+            a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+            a10 = A_data[i + 1][j], a11 = A_data[i + 1][j + 1], a12 = A_data[i + 1][j + 2], a13 = A_data[i + 1][j + 3];
+            a20 = A_data[i + 2][j], a21 = A_data[i + 2][j + 1], a22 = A_data[i + 2][j + 2], a23 = A_data[i + 2][j + 3];
+            a30 = A_data[i + 3][j], a31 = A_data[i + 3][j + 1], a32 = A_data[i + 3][j + 2], a33 = A_data[i + 3][j + 3];
+
+            for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i][k + 1] += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
+                Result_data[i][k + 2] += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
+                Result_data[i][k + 3] += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+
+                Result_data[i + 1][k] += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+                Result_data[i + 1][k + 1] += a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31;
+                Result_data[i + 1][k + 2] += a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32;
+                Result_data[i + 1][k + 3] += a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33;
+
+                Result_data[i + 2][k] += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+                Result_data[i + 2][k + 1] += a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31;
+                Result_data[i + 2][k + 2] += a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32;
+                Result_data[i + 2][k + 3] += a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33;
+
+                Result_data[i + 3][k] += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+                Result_data[i + 3][k + 1] += a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31;
+                Result_data[i + 3][k + 2] += a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32;
+                Result_data[i + 3][k + 3] += a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33;
+            }
+            // If column B is indivisible by unrolling factor. This do the rest.
+            for (k = last_col_B_to_unroll; k < end_col; k++)
+            {
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i + 1][k] += a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30;
+                Result_data[i + 2][k] += a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30;
+                Result_data[i + 3][k] += a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30;
+            }
+        }
+        // If column A is indivisible by unrolling factor. This do the rest, while keep k unrolling.
+        for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+        {
+            a00 = A_data[i][j];
+            a10 = A_data[i + 1][j];
+            a20 = A_data[i + 2][j];
+            a30 = A_data[i + 3][j];
+            for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+
+                Result_data[i][k] += a00 * b00;
+                Result_data[i][k + 1] += a00 * b01;
+                Result_data[i][k + 2] += a00 * b02;
+                Result_data[i][k + 3] += a00 * b03;
+
+                Result_data[i + 1][k] += a10 * b00;
+                Result_data[i + 1][k + 1] += a10 * b01;
+                Result_data[i + 1][k + 2] += a10 * b02;
+                Result_data[i + 1][k + 3] += a10 * b03;
+
+                Result_data[i + 2][k] += a20 * b00;
+                Result_data[i + 2][k + 1] += a20 * b01;
+                Result_data[i + 2][k + 2] += a20 * b02;
+                Result_data[i + 2][k + 3] += a20 * b03;
+
+                Result_data[i + 3][k] += a30 * b00;
+                Result_data[i + 3][k + 1] += a30 * b01;
+                Result_data[i + 3][k + 2] += a30 * b02;
+                Result_data[i + 3][k + 3] += a30 * b03;
+            }
+            for (k = last_col_B_to_unroll; k < end_col; k++)
+            {
+                b00 = B_data[j][k];
+                Result_data[i][k] += a00 * b00;
+                Result_data[i + 1][k] += a10 * b00;
+                Result_data[i + 2][k] += a20 * b00;
+                Result_data[i + 3][k] += a30 * b00;
+            }
+        }
+    }
+    for (i = last_row_A_to_unroll; i < end_row; i++)
+    {
+        for (j = 0; j < last_col_A_to_unroll; j += UnrollingFactor)
+        {
+            a00 = A_data[i][j], a01 = A_data[i][j + 1], a02 = A_data[i][j + 2], a03 = A_data[i][j + 3];
+            for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                b10 = B_data[j + 1][k], b11 = B_data[j + 1][k + 1], b12 = B_data[j + 1][k + 2], b13 = B_data[j + 1][k + 3];
+                b20 = B_data[j + 2][k], b21 = B_data[j + 2][k + 1], b22 = B_data[j + 2][k + 2], b23 = B_data[j + 2][k + 3];
+                b30 = B_data[j + 3][k], b31 = B_data[j + 3][k + 1], b32 = B_data[j + 3][k + 2], b33 = B_data[j + 3][k + 3];
+
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+                Result_data[i][k + 1] += a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31;
+                Result_data[i][k + 2] += a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32;
+                Result_data[i][k + 3] += a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33;
+            }
+            for (k = last_col_B_to_unroll; k < end_col; k++)
+            {
+                b00 = B_data[j][k];
+                b10 = B_data[j + 1][k];
+                b20 = B_data[j + 2][k];
+                b30 = B_data[j + 3][k];
+                Result_data[i][k] += a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30;
+            }
+        }
+        for (j = last_col_A_to_unroll; j < args->A.columns; j++)
+        {
+            a00 = A_data[i][j];
+            for (k = start_col; k < last_col_B_to_unroll; k += UnrollingFactor)
+            {
+                b00 = B_data[j][k], b01 = B_data[j][k + 1], b02 = B_data[j][k + 2], b03 = B_data[j][k + 3];
+                Result_data[i][k] += a00 * b00;
+                Result_data[i][k + 1] += a00 * b01;
+                Result_data[i][k + 2] += a00 * b02;
+                Result_data[i][k + 3] += a00 * b03;
+            }
+            for (k = last_col_B_to_unroll; k < end_col; k++)
+            {
+                b00 = B_data[j][k];
+                Result_data[i][k] += a00 * b00;
+            }
+        }
+    }
+    return NULL;
+}
+
+void compareMatrix(matrix A, matrix B)
 {
     if (A.rows != B.rows || A.columns != B.columns)
     {
         printf("Dimension of two matrices are different");
         return;
     }
-
-    printf("Starting comparison\n");
     int cnt = 0;
     if (IS_DOUBLE)
     {
@@ -685,6 +1351,7 @@ void compareMatrix(Matrix A, Matrix B)
         double **B_data = ((double **)B.data);
         for (int i = 0; i < A.rows; i++)
             for (int j = 0; j < A.columns; j++)
+                // if the abs diff larger than 1.0E-10, it is not equal
                 if ((A_data[i][j] - B_data[i][j]) * (A_data[i][j] - B_data[i][j]) > 1.0E-10)
                 {
                     printf("%.6f\n", (A_data[i][j] - B_data[i][j]) * (A_data[i][j] - B_data[i][j]));
@@ -697,506 +1364,273 @@ void compareMatrix(Matrix A, Matrix B)
         float **B_data = ((float **)B.data);
         for (int i = 0; i < A.rows; i++)
             for (int j = 0; j < A.columns; j++)
-                if ((A_data[i][j] - B_data[i][j]) * (A_data[i][j] - B_data[i][j]) > 1.0E-10)
+            {
+                // https://randomascii.wordpress.com/2012/02/25/comparing-floating-point-numbers-2012-edition/
+                float diff = fabsf(A_data[i][j] - B_data[i][j]);
+                float maxVal = fmaxf(fabsf(A_data[i][j]), fabsf(B_data[i][j]));
+                // roughtly compare -> the first one -> diff is greater than 1e-3
+                // precise compare -> the second one -> considers the magnitude
+                if (diff > 1e-3 && diff / (maxVal + 1e-6) > 1e-3)
                 {
-                    printf("%.6f\n", (A_data[i][j] - B_data[i][j]) * (A_data[i][j] - B_data[i][j]));
+                    printf("%.3f\n", fabs(A_data[i][j] - B_data[i][j]));
                     cnt++;
                 }
+            }
     }
     if (cnt == 0)
-        printf("Done. There are no differences!\n\n");
+        printf("Compare Matrices Done. There are no differences!\n");
     else
-        printf("Results are incorrect! The number of different elements is %d\n\n", cnt);
+        printf("Results are incorrect! The number of different elements is %d\n", cnt);
 }
 
-void resetMatrix(Matrix A)
+void initializeMatrixWithRandom(matrix *mat, int rows, int columns)
 {
-    void **A_data;
-    A_data = A.data;
-
-    for (int i = 0; i < A.rows; i++)
-    {
-        for (int j = 0; j < A.columns; j++)
-        {
-            if (IS_DOUBLE)
-            {
-                ((double **)A_data)[i][j] = 0;
-            }
-            else
-            {
-                ((float **)A_data)[i][j] = 0;
-            }
-        }
-    }
-}
-
-void *_parallelMatrixMul(void *arg)
-{
-    thread_arg *args = (thread_arg *)arg;
-    Matrix A = args->A;
-    Matrix B = args->B;
-    Matrix Buffer = args->C;
-    int thread_id = args->thread_id;
-
-    int i, j, k, start_row, end_row;
-    start_row = A.rows * thread_id / NUM_THREADS;
-    end_row = A.rows * (thread_id + 1) / NUM_THREADS;
-    int NRA0 = end_row / 4 * 4;
-    int NCA0 = A.columns / 4 * 4;
-    int NCB0 = B.columns / 4 * 4;
     if (IS_DOUBLE)
     {
-        double ai00, ai01, ai02, ai03, ai10, ai11, ai12, ai13, ai20, ai21, ai22, ai23, ai30, ai31, ai32, ai33;
-        double bj00, bj01, bj02, bj03, bj10, bj11, bj12, bj13, bj20, bj21, bj22, bj23, bj30, bj31, bj32, bj33;
-
-        double **buffer_data = ((double **)Buffer.data);
-        double **A_data = (double **)A.data;
-        double **B_data = (double **)B.data;
-
-        for (i = start_row; i < end_row; i += 4)
+        double *Buff0;
+        double **Buff;
+        if (rows * columns * sizeof(double) % ALIGNMENT == 0)
         {
-            for (k = 0; k < NCA0; k += 4)
-            {
-                ai00 = A_data[i][k];
-                ai01 = A_data[i][k + 1];
-                ai02 = A_data[i][k + 2];
-                ai03 = A_data[i][k + 3];
-                ai10 = A_data[i + 1][k];
-                ai11 = A_data[i + 1][k + 1];
-                ai12 = A_data[i + 1][k + 2];
-                ai13 = A_data[i + 1][k + 3];
-                ai20 = A_data[i + 2][k];
-                ai21 = A_data[i + 2][k + 1];
-                ai22 = A_data[i + 2][k + 2];
-                ai23 = A_data[i + 2][k + 3];
-                ai30 = A_data[i + 3][k];
-                ai31 = A_data[i + 3][k + 1];
-                ai32 = A_data[i + 3][k + 2];
-                ai33 = A_data[i + 3][k + 3];
-
-                for (j = 0; j < NCB0; j += 4)
-                {
-                    bj00 = B_data[k][j];
-                    bj01 = B_data[k][j + 1];
-                    bj02 = B_data[k][j + 2];
-                    bj03 = B_data[k][j + 3];
-                    bj10 = B_data[k + 1][j];
-                    bj11 = B_data[k + 1][j + 1];
-                    bj12 = B_data[k + 1][j + 2];
-                    bj13 = B_data[k + 1][j + 3];
-                    bj20 = B_data[k + 2][j];
-                    bj21 = B_data[k + 2][j + 1];
-                    bj22 = B_data[k + 2][j + 2];
-                    bj23 = B_data[k + 2][j + 3];
-                    bj30 = B_data[k + 3][j];
-                    bj31 = B_data[k + 3][j + 1];
-                    bj32 = B_data[k + 3][j + 2];
-                    bj33 = B_data[k + 3][j + 3];
-
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                    buffer_data[i][j + 1] = buffer_data[i][j + 1] + ai00 * bj01 + ai01 * bj11 + ai02 * bj21 + ai03 * bj31;
-                    buffer_data[i][j + 2] = buffer_data[i][j + 2] + ai00 * bj02 + ai01 * bj12 + ai02 * bj22 + ai03 * bj32;
-                    buffer_data[i][j + 3] = buffer_data[i][j + 3] + ai00 * bj03 + ai01 * bj13 + ai02 * bj23 + ai03 * bj33;
-
-                    buffer_data[i + 1][j] = buffer_data[i + 1][j] + ai10 * bj00 + ai11 * bj10 + ai12 * bj20 + ai13 * bj30;
-                    buffer_data[i + 1][j + 1] = buffer_data[i + 1][j + 1] + ai10 * bj01 + ai11 * bj11 + ai12 * bj21 + ai13 * bj31;
-                    buffer_data[i + 1][j + 2] = buffer_data[i + 1][j + 2] + ai10 * bj02 + ai11 * bj12 + ai12 * bj22 + ai13 * bj32;
-                    buffer_data[i + 1][j + 3] = buffer_data[i + 1][j + 3] + ai10 * bj03 + ai11 * bj13 + ai12 * bj23 + ai13 * bj33;
-
-                    buffer_data[i + 2][j] = buffer_data[i + 2][j] + ai20 * bj00 + ai21 * bj10 + ai22 * bj20 + ai23 * bj30;
-                    buffer_data[i + 2][j + 1] = buffer_data[i + 2][j + 1] + ai20 * bj01 + ai21 * bj11 + ai22 * bj21 + ai23 * bj31;
-                    buffer_data[i + 2][j + 2] = buffer_data[i + 2][j + 2] + ai20 * bj02 + ai21 * bj12 + ai22 * bj22 + ai23 * bj32;
-                    buffer_data[i + 2][j + 3] = buffer_data[i + 2][j + 3] + ai20 * bj03 + ai21 * bj13 + ai22 * bj23 + ai23 * bj33;
-
-                    buffer_data[i + 3][j] = buffer_data[i + 3][j] + ai30 * bj00 + ai31 * bj10 + ai32 * bj20 + ai33 * bj30;
-                    buffer_data[i + 3][j + 1] = buffer_data[i + 3][j + 1] + ai30 * bj01 + ai31 * bj11 + ai32 * bj21 + ai33 * bj31;
-                    buffer_data[i + 3][j + 2] = buffer_data[i + 3][j + 2] + ai30 * bj02 + ai31 * bj12 + ai32 * bj22 + ai33 * bj32;
-                    buffer_data[i + 3][j + 3] = buffer_data[i + 3][j + 3] + ai30 * bj03 + ai31 * bj13 + ai32 * bj23 + ai33 * bj33;
-                }
-
-                // For elelments in remaining j columns
-                for (j = NCB0; j < B.columns; j++)
-                {
-                    bj00 = B_data[k][j];
-                    bj10 = B_data[k + 1][j];
-                    bj20 = B_data[k + 2][j];
-                    bj30 = B_data[k + 3][j];
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                    buffer_data[i + 1][j] = buffer_data[i + 1][j] + ai10 * bj00 + ai11 * bj10 + ai12 * bj20 + ai13 * bj30;
-                    buffer_data[i + 2][j] = buffer_data[i + 2][j] + ai20 * bj00 + ai21 * bj10 + ai22 * bj20 + ai23 * bj30;
-                    buffer_data[i + 3][j] = buffer_data[i + 3][j] + ai30 * bj00 + ai31 * bj10 + ai32 * bj20 + ai33 * bj30;
-                }
-            }
-
-            // for the remaining k
-            for (k = NCA0; k < A.columns; k++)
-            {
-                ai00 = A_data[i][k];
-                ai10 = A_data[i + 1][k];
-                ai20 = A_data[i + 2][k];
-                ai30 = A_data[i + 3][k];
-
-                for (j = 0; j < NCB0; j += 4)
-                {
-                    bj00 = B_data[k][j];
-                    bj01 = B_data[k][j + 1];
-                    bj02 = B_data[k][j + 2];
-                    bj03 = B_data[k][j + 3];
-
-                    buffer_data[i][j] += ai00 * bj00;
-                    buffer_data[i][j + 1] += ai00 * bj01;
-                    buffer_data[i][j + 2] += ai00 * bj02;
-                    buffer_data[i][j + 3] += ai00 * bj03;
-
-                    buffer_data[i + 1][j] += ai10 * bj00;
-                    buffer_data[i + 1][j + 1] += ai10 * bj01;
-                    buffer_data[i + 1][j + 2] += ai10 * bj02;
-                    buffer_data[i + 1][j + 3] += ai10 * bj03;
-
-                    buffer_data[i + 2][j] += ai20 * bj00;
-                    buffer_data[i + 2][j + 1] += ai20 * bj01;
-                    buffer_data[i + 2][j + 2] += ai20 * bj02;
-                    buffer_data[i + 2][j + 3] += ai20 * bj03;
-
-                    buffer_data[i + 3][j] += ai30 * bj00;
-                    buffer_data[i + 3][j + 1] += ai30 * bj01;
-                    buffer_data[i + 3][j + 2] += ai30 * bj02;
-                    buffer_data[i + 3][j + 3] += ai30 * bj03;
-                }
-
-                // For elelments in remaining j columns
-                for (j = NCB0; j < B.columns; j++)
-                {
-                    bj00 = B_data[k][j];
-                    buffer_data[i][j] += ai00 * bj00;
-                    buffer_data[i + 1][j] += ai10 * bj00;
-                    buffer_data[i + 2][j] += ai20 * bj00;
-                    buffer_data[i + 3][j] += ai30 * bj00;
-                }
-            }
+            Buff0 = aligned_alloc(ALIGNMENT, rows * columns * sizeof(double));
+            Buff = aligned_alloc(ALIGNMENT, rows * sizeof(double *));
         }
-        // For elements in remaining i rows
-        for (i = NRA0; i < end_row; i++)
+        else
         {
-            for (k = 0; k < NCA0; k += 4)
+            Buff0 = malloc(rows * columns * sizeof(double));
+            Buff = malloc(rows * sizeof(double *));
+        }
+
+        for (int i = 0; i < rows; i++)
+        {
+            Buff[i] = Buff0 + i * columns;
+        }
+        mat->data = (void **)Buff;
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < columns; j++)
             {
-                ai00 = A_data[i][k];
-                ai01 = A_data[i][k + 1];
-                ai02 = A_data[i][k + 2];
-                ai03 = A_data[i][k + 3];
-                for (j = 0; j < NCB0; j += 4)
-                {
-                    bj00 = B_data[k][j];
-                    bj01 = B_data[k][j + 1];
-                    bj02 = B_data[k][j + 2];
-                    bj03 = B_data[k][j + 3];
-                    bj10 = B_data[k + 1][j];
-                    bj11 = B_data[k + 1][j + 1];
-                    bj12 = B_data[k + 1][j + 2];
-                    bj13 = B_data[k + 1][j + 3];
-                    bj20 = B_data[k + 2][j];
-                    bj21 = B_data[k + 2][j + 1];
-                    bj22 = B_data[k + 2][j + 2];
-                    bj23 = B_data[k + 2][j + 3];
-                    bj30 = B_data[k + 3][j];
-                    bj31 = B_data[k + 3][j + 1];
-                    bj32 = B_data[k + 3][j + 2];
-                    bj33 = B_data[k + 3][j + 3];
-
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                    buffer_data[i][j + 1] = buffer_data[i][j + 1] + ai00 * bj01 + ai01 * bj11 + ai02 * bj21 + ai03 * bj31;
-                    buffer_data[i][j + 2] = buffer_data[i][j + 2] + ai00 * bj02 + ai01 * bj12 + ai02 * bj22 + ai03 * bj32;
-                    buffer_data[i][j + 3] = buffer_data[i][j + 3] + ai00 * bj03 + ai01 * bj13 + ai02 * bj23 + ai03 * bj33;
-                }
-
-                // For elelments in remaining j columns
-                for (j = NCB0; j < B.columns; j++)
-                {
-                    bj00 = B_data[k][j];
-                    bj10 = B_data[k + 1][j];
-                    bj20 = B_data[k + 2][j];
-                    bj30 = B_data[k + 3][j];
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                }
-            }
-
-            // for the remaining k
-            for (k = NCA0; k < A.columns; k++)
-            {
-                ai00 = A_data[i][k];
-                for (j = 0; j < B.columns; j++)
-                    buffer_data[i][j] += ai00 * B_data[k][j];
+                ((double **)mat->data)[i][j] = (double)rand() / RAND_MAX;
             }
         }
     }
     else
     {
-        float ai00, ai01, ai02, ai03, ai10, ai11, ai12, ai13, ai20, ai21, ai22, ai23, ai30, ai31, ai32, ai33;
-        float bj00, bj01, bj02, bj03, bj10, bj11, bj12, bj13, bj20, bj21, bj22, bj23, bj30, bj31, bj32, bj33;
-
-        float **buffer_data = ((float **)Buffer.data);
-        float **A_data = (float **)A.data;
-        float **B_data = (float **)B.data;
-
-        for (i = start_row; i < end_row; i += 4)
+        float *Buff0;
+        float **Buff;
+        if (rows * columns * sizeof(float) % ALIGNMENT == 0)
         {
-            for (k = 0; k < NCA0; k += 4)
-            {
-                ai00 = A_data[i][k];
-                ai01 = A_data[i][k + 1];
-                ai02 = A_data[i][k + 2];
-                ai03 = A_data[i][k + 3];
-                ai10 = A_data[i + 1][k];
-                ai11 = A_data[i + 1][k + 1];
-                ai12 = A_data[i + 1][k + 2];
-                ai13 = A_data[i + 1][k + 3];
-                ai20 = A_data[i + 2][k];
-                ai21 = A_data[i + 2][k + 1];
-                ai22 = A_data[i + 2][k + 2];
-                ai23 = A_data[i + 2][k + 3];
-                ai30 = A_data[i + 3][k];
-                ai31 = A_data[i + 3][k + 1];
-                ai32 = A_data[i + 3][k + 2];
-                ai33 = A_data[i + 3][k + 3];
-
-                for (j = 0; j < NCB0; j += 4)
-                {
-                    bj00 = B_data[k][j];
-                    bj01 = B_data[k][j + 1];
-                    bj02 = B_data[k][j + 2];
-                    bj03 = B_data[k][j + 3];
-                    bj10 = B_data[k + 1][j];
-                    bj11 = B_data[k + 1][j + 1];
-                    bj12 = B_data[k + 1][j + 2];
-                    bj13 = B_data[k + 1][j + 3];
-                    bj20 = B_data[k + 2][j];
-                    bj21 = B_data[k + 2][j + 1];
-                    bj22 = B_data[k + 2][j + 2];
-                    bj23 = B_data[k + 2][j + 3];
-                    bj30 = B_data[k + 3][j];
-                    bj31 = B_data[k + 3][j + 1];
-                    bj32 = B_data[k + 3][j + 2];
-                    bj33 = B_data[k + 3][j + 3];
-
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                    buffer_data[i][j + 1] = buffer_data[i][j + 1] + ai00 * bj01 + ai01 * bj11 + ai02 * bj21 + ai03 * bj31;
-                    buffer_data[i][j + 2] = buffer_data[i][j + 2] + ai00 * bj02 + ai01 * bj12 + ai02 * bj22 + ai03 * bj32;
-                    buffer_data[i][j + 3] = buffer_data[i][j + 3] + ai00 * bj03 + ai01 * bj13 + ai02 * bj23 + ai03 * bj33;
-
-                    buffer_data[i + 1][j] = buffer_data[i + 1][j] + ai10 * bj00 + ai11 * bj10 + ai12 * bj20 + ai13 * bj30;
-                    buffer_data[i + 1][j + 1] = buffer_data[i + 1][j + 1] + ai10 * bj01 + ai11 * bj11 + ai12 * bj21 + ai13 * bj31;
-                    buffer_data[i + 1][j + 2] = buffer_data[i + 1][j + 2] + ai10 * bj02 + ai11 * bj12 + ai12 * bj22 + ai13 * bj32;
-                    buffer_data[i + 1][j + 3] = buffer_data[i + 1][j + 3] + ai10 * bj03 + ai11 * bj13 + ai12 * bj23 + ai13 * bj33;
-
-                    buffer_data[i + 2][j] = buffer_data[i + 2][j] + ai20 * bj00 + ai21 * bj10 + ai22 * bj20 + ai23 * bj30;
-                    buffer_data[i + 2][j + 1] = buffer_data[i + 2][j + 1] + ai20 * bj01 + ai21 * bj11 + ai22 * bj21 + ai23 * bj31;
-                    buffer_data[i + 2][j + 2] = buffer_data[i + 2][j + 2] + ai20 * bj02 + ai21 * bj12 + ai22 * bj22 + ai23 * bj32;
-                    buffer_data[i + 2][j + 3] = buffer_data[i + 2][j + 3] + ai20 * bj03 + ai21 * bj13 + ai22 * bj23 + ai23 * bj33;
-
-                    buffer_data[i + 3][j] = buffer_data[i + 3][j] + ai30 * bj00 + ai31 * bj10 + ai32 * bj20 + ai33 * bj30;
-                    buffer_data[i + 3][j + 1] = buffer_data[i + 3][j + 1] + ai30 * bj01 + ai31 * bj11 + ai32 * bj21 + ai33 * bj31;
-                    buffer_data[i + 3][j + 2] = buffer_data[i + 3][j + 2] + ai30 * bj02 + ai31 * bj12 + ai32 * bj22 + ai33 * bj32;
-                    buffer_data[i + 3][j + 3] = buffer_data[i + 3][j + 3] + ai30 * bj03 + ai31 * bj13 + ai32 * bj23 + ai33 * bj33;
-                }
-
-                // For elelments in remaining j columns
-                for (j = NCB0; j < B.columns; j++)
-                {
-                    bj00 = B_data[k][j];
-                    bj10 = B_data[k + 1][j];
-                    bj20 = B_data[k + 2][j];
-                    bj30 = B_data[k + 3][j];
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                    buffer_data[i + 1][j] = buffer_data[i + 1][j] + ai10 * bj00 + ai11 * bj10 + ai12 * bj20 + ai13 * bj30;
-                    buffer_data[i + 2][j] = buffer_data[i + 2][j] + ai20 * bj00 + ai21 * bj10 + ai22 * bj20 + ai23 * bj30;
-                    buffer_data[i + 3][j] = buffer_data[i + 3][j] + ai30 * bj00 + ai31 * bj10 + ai32 * bj20 + ai33 * bj30;
-                }
-            }
-
-            // for the remaining k
-            for (k = NCA0; k < A.columns; k++)
-            {
-                ai00 = A_data[i][k];
-                ai10 = A_data[i + 1][k];
-                ai20 = A_data[i + 2][k];
-                ai30 = A_data[i + 3][k];
-
-                for (j = 0; j < NCB0; j += 4)
-                {
-                    bj00 = B_data[k][j];
-                    bj01 = B_data[k][j + 1];
-                    bj02 = B_data[k][j + 2];
-                    bj03 = B_data[k][j + 3];
-
-                    buffer_data[i][j] += ai00 * bj00;
-                    buffer_data[i][j + 1] += ai00 * bj01;
-                    buffer_data[i][j + 2] += ai00 * bj02;
-                    buffer_data[i][j + 3] += ai00 * bj03;
-
-                    buffer_data[i + 1][j] += ai10 * bj00;
-                    buffer_data[i + 1][j + 1] += ai10 * bj01;
-                    buffer_data[i + 1][j + 2] += ai10 * bj02;
-                    buffer_data[i + 1][j + 3] += ai10 * bj03;
-
-                    buffer_data[i + 2][j] += ai20 * bj00;
-                    buffer_data[i + 2][j + 1] += ai20 * bj01;
-                    buffer_data[i + 2][j + 2] += ai20 * bj02;
-                    buffer_data[i + 2][j + 3] += ai20 * bj03;
-
-                    buffer_data[i + 3][j] += ai30 * bj00;
-                    buffer_data[i + 3][j + 1] += ai30 * bj01;
-                    buffer_data[i + 3][j + 2] += ai30 * bj02;
-                    buffer_data[i + 3][j + 3] += ai30 * bj03;
-                }
-
-                // For elelments in remaining j columns
-                for (j = NCB0; j < B.columns; j++)
-                {
-                    bj00 = B_data[k][j];
-                    buffer_data[i][j] += ai00 * bj00;
-                    buffer_data[i + 1][j] += ai10 * bj00;
-                    buffer_data[i + 2][j] += ai20 * bj00;
-                    buffer_data[i + 3][j] += ai30 * bj00;
-                }
-            }
+            Buff0 = aligned_alloc(ALIGNMENT, rows * columns * sizeof(float));
+            Buff = aligned_alloc(ALIGNMENT, rows * sizeof(float *));
         }
-        // For elements in remaining i rows
-        for (i = NRA0; i < end_row; i++)
+        else
         {
-            for (k = 0; k < NCA0; k += 4)
+            Buff0 = malloc(rows * columns * sizeof(float));
+            Buff = malloc(rows * sizeof(float *));
+        }
+
+        for (int i = 0; i < rows; i++)
+        {
+            Buff[i] = Buff0 + i * columns;
+        }
+        mat->data = (void **)Buff;
+
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < columns; j++)
             {
-                ai00 = A_data[i][k];
-                ai01 = A_data[i][k + 1];
-                ai02 = A_data[i][k + 2];
-                ai03 = A_data[i][k + 3];
-                for (j = 0; j < NCB0; j += 4)
-                {
-                    bj00 = B_data[k][j];
-                    bj01 = B_data[k][j + 1];
-                    bj02 = B_data[k][j + 2];
-                    bj03 = B_data[k][j + 3];
-                    bj10 = B_data[k + 1][j];
-                    bj11 = B_data[k + 1][j + 1];
-                    bj12 = B_data[k + 1][j + 2];
-                    bj13 = B_data[k + 1][j + 3];
-                    bj20 = B_data[k + 2][j];
-                    bj21 = B_data[k + 2][j + 1];
-                    bj22 = B_data[k + 2][j + 2];
-                    bj23 = B_data[k + 2][j + 3];
-                    bj30 = B_data[k + 3][j];
-                    bj31 = B_data[k + 3][j + 1];
-                    bj32 = B_data[k + 3][j + 2];
-                    bj33 = B_data[k + 3][j + 3];
-
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                    buffer_data[i][j + 1] = buffer_data[i][j + 1] + ai00 * bj01 + ai01 * bj11 + ai02 * bj21 + ai03 * bj31;
-                    buffer_data[i][j + 2] = buffer_data[i][j + 2] + ai00 * bj02 + ai01 * bj12 + ai02 * bj22 + ai03 * bj32;
-                    buffer_data[i][j + 3] = buffer_data[i][j + 3] + ai00 * bj03 + ai01 * bj13 + ai02 * bj23 + ai03 * bj33;
-                }
-
-                // For elelments in remaining j columns
-                for (j = NCB0; j < B.columns; j++)
-                {
-                    bj00 = B_data[k][j];
-                    bj10 = B_data[k + 1][j];
-                    bj20 = B_data[k + 2][j];
-                    bj30 = B_data[k + 3][j];
-                    buffer_data[i][j] = buffer_data[i][j] + ai00 * bj00 + ai01 * bj10 + ai02 * bj20 + ai03 * bj30;
-                }
-            }
-
-            // for the remaining k
-            for (k = NCA0; k < A.columns; k++)
-            {
-                ai00 = A_data[i][k];
-                for (j = 0; j < B.columns; j++)
-                    buffer_data[i][j] += ai00 * B_data[k][j];
+                ((float **)mat->data)[i][j] = (float)rand() / RAND_MAX;
             }
         }
     }
-    return NULL;
+    mat->rows = rows;
+    mat->columns = columns;
 }
 
-void matrixMulParallel(Matrix MatA, Matrix MatB, Matrix MatC, Matrix MatD)
+void initializeMatrixWithZero(matrix *mat, int rows, int columns)
 {
-    pthread_t threads[NUM_THREADS];
-    thread_arg args[NUM_THREADS];
-    Matrix TMP;
-
-    int cost1 = MatA.rows * MatA.columns * MatB.columns + MatA.columns * MatC.rows * MatC.columns; // cost of (A*B)*C
-    int cost2 = MatB.rows * MatB.columns * MatC.columns + MatA.rows * MatA.columns * MatC.columns; // cost of A*(B*C)
-    if (cost1 <= cost2)
+    if (IS_DOUBLE)
     {
-        initializeMatrix(&TMP, MatA.rows, MatB.columns);
+        double *Buff0;
+        double **Buff;
+        if (rows * columns * sizeof(double) % ALIGNMENT == 0)
+        {
+            Buff0 = aligned_alloc(ALIGNMENT, rows * columns * sizeof(double));
+            Buff = aligned_alloc(ALIGNMENT, rows * sizeof(double *));
+        }
+        else
+        {
+            Buff0 = malloc(rows * columns * sizeof(double));
+            Buff = malloc(rows * sizeof(double *));
+        }
+
+        for (int i = 0; i < rows; i++)
+        {
+            Buff[i] = Buff0 + i * columns;
+        }
+        mat->data = (void **)Buff;
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < columns; j++)
+            {
+                ((double **)mat->data)[i][j] = 0.0;
+            }
+        }
     }
     else
     {
-        initializeMatrix(&TMP, MatB.rows, MatC.columns);
+        float *Buff0;
+        float **Buff;
+        if (rows * columns * sizeof(float) % ALIGNMENT == 0)
+        {
+            Buff0 = aligned_alloc(ALIGNMENT, rows * columns * sizeof(float));
+            Buff = aligned_alloc(ALIGNMENT, rows * sizeof(float *));
+        }
+        else
+        {
+            Buff0 = malloc(rows * columns * sizeof(float));
+            Buff = malloc(rows * sizeof(float *));
+        }
+
+        for (int i = 0; i < rows; i++)
+        {
+            Buff[i] = Buff0 + i * columns;
+        }
+        mat->data = (void **)Buff;
+
+        for (int i = 0; i < rows; i++)
+        {
+            for (int j = 0; j < columns; j++)
+            {
+                ((float **)mat->data)[i][j] = 0.0;
+            }
+        }
     }
-    struct timeval start_time, end_time;
+    mat->rows = rows;
+    mat->columns = columns;
+}
+
+float matrixMulSeq(matrix A, matrix B, matrix C, matrix D)
+{
+    int cost1 = A.rows * A.columns * B.columns + A.rows * B.columns * C.columns; // cost of (A*B)*C
+    int cost2 = B.rows * B.columns * C.columns + A.rows * A.columns * C.columns; // cost of A*(B*C)
+    matrix TMP;
+    float elapsed = 0.0;
+
+    // struct timeval start_time, end_time;
+    // float seconds, microseconds, elapsed;
+    float (*matrixMul)(matrix A, matrix B, matrix Result) = IS_DOUBLE ? matrixMulLoopUnrollingDouble : matrixMulLoopUnrollingFloat;
+    if (cost1 <= cost2)
+    {
+        // Compute (AxB)xC
+        initializeMatrixWithZero(&TMP, A.rows, B.columns);
+        elapsed += matrixMul(A, B, TMP);
+        elapsed += matrixMul(TMP, C, D);
+    }
+    else
+    {
+        // Compute Ax(BxC)
+        initializeMatrixWithZero(&TMP, B.rows, C.columns);
+        elapsed += matrixMul(B, C, TMP);
+        elapsed += matrixMul(A, TMP, D);
+    }
+
+    printf("Sequential computing takes %f seconds to finish the computation.\n", elapsed);
+
+    freeMatrix(&TMP);
+    return elapsed;
+}
+
+float runParallelMultiplication(matrix A, matrix B, matrix Result, int num_threads_row, int num_threads_col, void *(*worker)(void *), t_arg args[][num_threads_col], pthread_t threads[][num_threads_col])
+{
+    int block_size_row = Result.rows / num_threads_row;
+    int block_size_col = Result.columns / num_threads_col;
     float seconds, microseconds, elapsed;
+    struct timeval start_time, end_time;
 
+    for (int i = 0; i < num_threads_row; i++)
+    {
+        for (int j = 0; j < num_threads_col; j++)
+        {
+            int start_row = block_size_row * i;
+            int start_col = block_size_col * j;
+            int end_row = (i == num_threads_row - 1) ? Result.rows : block_size_row * (i + 1);
+            int end_col = (j == num_threads_col - 1) ? Result.columns : block_size_col * (j + 1);
+
+            args[i][j].A = A;
+            args[i][j].B = B;
+            args[i][j].Result = Result;
+            args[i][j].start_row = start_row;
+            args[i][j].start_col = start_col;
+            args[i][j].end_row = end_row;
+            args[i][j].end_col = end_col;
+        }
+    }
+
+    // try to the time spend avoid declaring variable and setting up thread arguments
+    // timer start from here
     gettimeofday(&start_time, 0);
-    // first matrix multiplication
-    for (int i = 0; i < NUM_THREADS; i++)
+    for (int i = 0; i < num_threads_row; i++)
     {
-        if (cost1 <= cost2)
+        for (int j = 0; j < num_threads_col; j++)
         {
-            args[i].A = MatA;
-            args[i].B = MatB;
-        }
-        else
-        {
-            args[i].A = MatB;
-            args[i].B = MatC;
-        }
-        args[i].C = TMP;
-        args[i].thread_id = i;
-        if (pthread_create(&threads[i], NULL, _parallelMatrixMul, (void *)&args[i]) != 0)
-        {
-            perror("Failed to create thread");
-            exit(EXIT_FAILURE);
+            if (pthread_create(&threads[i][j], NULL, worker, (void *)&args[i][j]) != 0)
+            {
+                fprintf(stderr, "Thread create failed\n");
+                exit(EXIT_FAILURE);
+            }
         }
     }
-
-    // Second Matrix multiplication
-    for (int i = 0; i < NUM_THREADS; i++)
+    for (int i = 0; i < num_threads_row; i++)
     {
-        pthread_join(threads[i], NULL);
-    }
-
-    printMatrix(TMP, 4, 4);
-    for (int i = 0; i < NUM_THREADS; i++)
-    {
-        if (cost1 <= cost2)
+        for (int j = 0; j < num_threads_col; j++)
         {
-            args[i].A = TMP;
-            args[i].B = MatC;
-        }
-        else
-        {
-            args[i].A = MatA;
-            args[i].B = TMP;
-        }
-        args[i].C = MatD;
-        args[i].thread_id = i;
-        if (pthread_create(&threads[i], NULL, _parallelMatrixMul, (void *)&args[i]) != 0)
-        {
-            perror("Failed to create thread");
-            exit(EXIT_FAILURE);
+            pthread_join(threads[i][j], NULL);
         }
     }
-    for (int i = 0; i < NUM_THREADS; i++)
-    {
-        pthread_join(threads[i], NULL);
-    }
-    printMatrix(MatD, 4, 4);
     gettimeofday(&end_time, 0);
+    // timer end here
     seconds = end_time.tv_sec - start_time.tv_sec;
     microseconds = end_time.tv_usec - start_time.tv_usec;
     elapsed = seconds + 1e-6 * microseconds;
-    printf("Parallel computing takes %f seconds to finish the computation.\n\n", elapsed);
+    return elapsed;
+}
+
+float matrixMulParallel(matrix A, matrix B, matrix C, matrix D)
+{
+    int num_threads_row = NUM_THREADS / sqrt(NUM_THREADS);
+    int num_threads_col = NUM_THREADS / num_threads_row;
+    // printf("Number thread col = %d\nNumber thread row = %d\n", num_threads_col, num_threads_row);
+
+    pthread_t threads[num_threads_row][num_threads_col];
+    t_arg arg[num_threads_row][num_threads_col];
+
+    matrix TMP;
+    float elapsed = 0.0;
+
+    int cost1 = A.rows * A.columns * B.columns + A.rows * B.columns * C.columns; // cost of (A*B)*C
+    int cost2 = B.rows * B.columns * C.columns + A.rows * A.columns * C.columns; // cost of A*(B*C)
+
+    void *(*_matrixMulLoopUnrollingParallel)(void *arg) = IS_DOUBLE ? _matrixMulLoopUnrollingParallelDouble : _matrixMulLoopUnrollingParallelFloat;
+
+    if (cost1 <= cost2)
+    {
+        // Compute (A*B)*C
+        initializeMatrixWithZero(&TMP, A.rows, B.columns);
+        elapsed += runParallelMultiplication(A, B, TMP, num_threads_row, num_threads_col, _matrixMulLoopUnrollingParallel, arg, threads);
+        elapsed += runParallelMultiplication(TMP, C, D, num_threads_row, num_threads_col, _matrixMulLoopUnrollingParallel, arg, threads);
+    }
+    else
+    {
+        // Compute A*(B*C)
+        initializeMatrixWithZero(&TMP, B.rows, C.columns);
+        elapsed += runParallelMultiplication(B, C, TMP, num_threads_row, num_threads_col, _matrixMulLoopUnrollingParallel, arg, threads);
+        elapsed += runParallelMultiplication(A, TMP, D, num_threads_row, num_threads_col, _matrixMulLoopUnrollingParallel, arg, threads);
+    }
+
+    printf("Parallel computing takes %f seconds to finish the computation.\n", elapsed);
+
     freeMatrix(&TMP);
+    return elapsed;
 }
 
 int main(int argc, char *argv[])
@@ -1206,6 +1640,7 @@ int main(int argc, char *argv[])
     // check a number of inputs 1 + 6 = 7
     if (argc != 7)
     {
+        fprintf(stderr, "The input is incorrect!");
         return 1;
     }
 
@@ -1213,81 +1648,68 @@ int main(int argc, char *argv[])
     int m, k, l, n;
     char *endptr;
     char *mode;
-    Matrix MatA, MatB, MatC, MatD, MatD2, MatD3;
     // Get the Input arguments
     m = strtol(argv[1], &endptr, 10);
-    if (endptr == argv[1] || *endptr != '\0')
+    if (endptr == argv[1] || *endptr != '\0' || m <= 0)
     {
         fprintf(stderr, "The first argument is incorrect!");
         return -1;
     }
     k = strtol(argv[2], &endptr, 10);
-    if (endptr == argv[2] || *endptr != '\0')
+    if (endptr == argv[2] || *endptr != '\0' || k <= 0)
     {
         fprintf(stderr, "The second argument is incorrect!");
         return -1;
     }
     l = strtol(argv[3], &endptr, 10);
-    if (endptr == argv[3] || *endptr != '\0')
+    if (endptr == argv[3] || *endptr != '\0' || l <= 0)
     {
         fprintf(stderr, "The third argument is incorrect!");
         return -1;
     }
     n = strtol(argv[4], &endptr, 10);
-    if (endptr == argv[4] || *endptr != '\0')
+    if (endptr == argv[4] || *endptr != '\0' || n <= 0)
     {
         fprintf(stderr, "The fourth argument is incorrect!");
         return -1;
     }
     mode = argv[5];
-    if (strcmp(mode, "float") != 0 && strcmp(mode, "double") != 0)
+    if (strcmp(mode, "float") == 0)
     {
-        fprintf(stderr, "The fifth argument is incorrect!");
-        return -1;
+        IS_DOUBLE = 0;
     }
-    if (strcmp(mode, "double") == 0)
+    else if (strcmp(mode, "double") == 0)
     {
         IS_DOUBLE = 1;
     }
     else
     {
-        IS_DOUBLE = 0;
+        fprintf(stderr, "The fifth argument is incorrect!");
+        return -1;
     }
 
     NUM_THREADS = strtol(argv[6], &endptr, 10);
-    if (endptr == argv[6] || *endptr != '\0' || NUM_THREADS > 64 || NUM_THREADS < 0)
+    if (endptr == argv[6] || *endptr != '\0' || NUM_THREADS > 64 || NUM_THREADS <= 0)
     {
         fprintf(stderr, "The sixth argument is incorrect!");
         return -1;
     }
 
-    // end of getting the inputs
-    initializeMatrixRandomNumber(&MatA, m, k); // Init with random numbers (0-1).
-    initializeMatrixRandomNumber(&MatB, k, l);
-    initializeMatrixRandomNumber(&MatC, l, n);
-    initializeMatrix(&MatD, m, n); // Init with all zeros
-    initializeMatrix(&MatD2, m, n);
-    initializeMatrix(&MatD3, m, n);
+    printf("User Inputs:\n\tSize %d %d %d %d\n\tmode=%s\n\tnum_threads=%d\n", m, k, l, n, mode, NUM_THREADS);
+    matrix A, B, C, D, D2;
+    initializeMatrixWithRandom(&A, m, k); // Init with random numbers (0-1).
+    initializeMatrixWithRandom(&B, k, l);
+    initializeMatrixWithRandom(&C, l, n);
+    initializeMatrixWithZero(&D, m, n);  // Init with all zeros
+    initializeMatrixWithZero(&D2, m, n); // Init with all zeros
 
-    printf("Is double : %d\n", IS_DOUBLE);
-    // Display first 4x4 Matrix
-    printf("Printing Matrix A\n");
-    printMatrix(MatA, 4, 4);
-    printf("Printing Matrix B\n");
-    printMatrix(MatB, 4, 4);
-    printf("Printing Matrix C\n");
-    printMatrix(MatC, 4, 4);
-    printf("Printing Matrix D\n");
-    printMatrix(MatD, 4, 4);
-
-    matrixMulSequencial(MatA, MatB, MatC, MatD);
-    matrixMulUnrolledSequencial(MatA, MatB, MatC, MatD2);
-    matrixMulParallel(MatA, MatB, MatC, MatD3);
-
-    printf("IKJ vs unrolled ");
-    compareMatrix(MatD, MatD2); // Compare Sequencial and unrolled results
-    printf("IKJ vs parallel ");
-    compareMatrix(MatD, MatD3);
-
-    return 0;
+    float seqTime, parTime, speedUp;
+    parTime = matrixMulParallel(A, B, C, D2);
+    seqTime = matrixMulSeq(A, B, C, D);
+    compareMatrix(D, D2);
+    speedUp = seqTime / parTime;
+    printf("Speed-up is %.4f\n", speedUp);
+    // printMatrix(D, 4, 4);
+    // printMatrix(D2, 4, 4);
+    print_memory_usage();
 }
